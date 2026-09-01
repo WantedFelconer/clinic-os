@@ -1,5 +1,5 @@
 -- ClinicOS Database Schema for MySQL 8.0+
--- Run: mysql -u root -p clinic_os < schema.sql
+-- Authoritative Schema Definition
 
 -- ============================================
 -- USERS
@@ -18,9 +18,27 @@ CREATE TABLE IF NOT EXISTS users (
   refresh_token TEXT,
   reset_password_token TEXT,
   reset_password_expires DATETIME,
+  verification_otp VARCHAR(255) DEFAULT NULL,
+  verification_otp_expires DATETIME DEFAULT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
+-- DOCTOR PROFILES (FR-10)
+-- ============================================
+CREATE TABLE IF NOT EXISTS doctor_profiles (
+  id VARCHAR(36) PRIMARY KEY,
+  user_id VARCHAR(36) UNIQUE NOT NULL,
+  qualifications TEXT,
+  specialization VARCHAR(255),
+  experience_years INT DEFAULT 0,
+  consultation_fee DECIMAL(10, 2) DEFAULT 0,
+  bio TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- CLINICS
@@ -47,7 +65,7 @@ CREATE TABLE IF NOT EXISTS clinics (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- CLINIC STAFF
@@ -62,7 +80,7 @@ CREATE TABLE IF NOT EXISTS clinic_staff (
   UNIQUE KEY uk_clinic_user (clinic_id, user_id),
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- CLINIC SCHEDULES
@@ -76,7 +94,7 @@ CREATE TABLE IF NOT EXISTS clinic_schedules (
   is_available BOOLEAN DEFAULT true,
   UNIQUE KEY uk_clinic_day (clinic_id, day_of_week),
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- CLINIC SERVICES
@@ -92,7 +110,7 @@ CREATE TABLE IF NOT EXISTS clinic_services (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- CONSULTATION PACKAGES
@@ -108,7 +126,7 @@ CREATE TABLE IF NOT EXISTS consultation_packages (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- PATIENTS
@@ -134,7 +152,7 @@ CREATE TABLE IF NOT EXISTS patients (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- APPOINTMENTS
@@ -158,7 +176,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
   FOREIGN KEY (doctor_id) REFERENCES users(id),
   FOREIGN KEY (service_id) REFERENCES clinic_services(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- MEDICAL RECORDS (EMR)
@@ -181,7 +199,7 @@ CREATE TABLE IF NOT EXISTS medical_records (
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
   FOREIGN KEY (doctor_id) REFERENCES users(id),
   FOREIGN KEY (appointment_id) REFERENCES appointments(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- PRESCRIPTIONS
@@ -201,7 +219,7 @@ CREATE TABLE IF NOT EXISTS prescriptions (
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
   FOREIGN KEY (doctor_id) REFERENCES users(id),
   FOREIGN KEY (appointment_id) REFERENCES appointments(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- PRESCRIPTION ITEMS
@@ -218,7 +236,7 @@ CREATE TABLE IF NOT EXISTS prescription_items (
   is_active BOOLEAN DEFAULT true,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (prescription_id) REFERENCES prescriptions(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- MEDICAL REPORTS
@@ -236,7 +254,7 @@ CREATE TABLE IF NOT EXISTS medical_reports (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
   FOREIGN KEY (doctor_id) REFERENCES users(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- PAYMENTS
@@ -261,7 +279,7 @@ CREATE TABLE IF NOT EXISTS payments (
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
   FOREIGN KEY (patient_id) REFERENCES patients(id),
   FOREIGN KEY (appointment_id) REFERENCES appointments(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- REVIEWS
@@ -271,16 +289,18 @@ CREATE TABLE IF NOT EXISTS reviews (
   clinic_id VARCHAR(36) NOT NULL,
   patient_id VARCHAR(36) NOT NULL,
   doctor_id VARCHAR(36),
+  appointment_id VARCHAR(36),
   rating TINYINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
   comment TEXT,
   is_approved BOOLEAN DEFAULT false,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_clinic_patient_review (clinic_id, patient_id),
+  UNIQUE KEY uk_appointment_review (appointment_id),
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
   FOREIGN KEY (patient_id) REFERENCES patients(id),
-  FOREIGN KEY (doctor_id) REFERENCES users(id)
-);
+  FOREIGN KEY (doctor_id) REFERENCES users(id),
+  FOREIGN KEY (appointment_id) REFERENCES appointments(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- SUBSCRIPTION PLANS
@@ -298,7 +318,7 @@ CREATE TABLE IF NOT EXISTS subscription_plans (
   is_active BOOLEAN DEFAULT true,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- CLINIC SUBSCRIPTIONS
@@ -316,7 +336,7 @@ CREATE TABLE IF NOT EXISTS clinic_subscriptions (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
   FOREIGN KEY (plan_id) REFERENCES subscription_plans(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- NOTIFICATIONS
@@ -332,7 +352,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   is_read BOOLEAN DEFAULT false,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- MESSAGES
@@ -347,7 +367,7 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (sender_id) REFERENCES users(id),
   FOREIGN KEY (receiver_id) REFERENCES users(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
 -- AUDIT LOGS
@@ -362,13 +382,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   ip_address VARCHAR(45),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- INDEXES
+-- AUTHORITATIVE INDEXES
 -- ============================================
-CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_doctor_profiles_user ON doctor_profiles(user_id);
 CREATE INDEX idx_clinics_owner ON clinics(owner_id);
 CREATE INDEX idx_clinics_slug ON clinics(slug);
 CREATE INDEX idx_clinic_staff_clinic ON clinic_staff(clinic_id);
@@ -379,14 +400,20 @@ CREATE INDEX idx_appointments_clinic ON appointments(clinic_id);
 CREATE INDEX idx_appointments_patient ON appointments(patient_id);
 CREATE INDEX idx_appointments_doctor ON appointments(doctor_id);
 CREATE INDEX idx_appointments_date ON appointments(appointment_date);
+CREATE INDEX idx_appointments_slot_conflict ON appointments(clinic_id, doctor_id, appointment_date, status, start_time, end_time);
 CREATE INDEX idx_medical_records_patient ON medical_records(patient_id);
 CREATE INDEX idx_medical_records_clinic ON medical_records(clinic_id);
+CREATE INDEX idx_medical_records_confidential ON medical_records(clinic_id, patient_id, is_confidential);
 CREATE INDEX idx_prescriptions_patient ON prescriptions(patient_id);
 CREATE INDEX idx_prescriptions_clinic ON prescriptions(clinic_id);
 CREATE INDEX idx_payments_clinic ON payments(clinic_id);
 CREATE INDEX idx_payments_patient ON payments(patient_id);
+CREATE INDEX idx_payments_status ON payments(payment_status);
 CREATE INDEX idx_reviews_clinic ON reviews(clinic_id);
+CREATE INDEX idx_reviews_doctor ON reviews(doctor_id);
 CREATE INDEX idx_notifications_user ON notifications(user_id);
 CREATE INDEX idx_messages_sender ON messages(sender_id);
 CREATE INDEX idx_messages_receiver ON messages(receiver_id);
+CREATE INDEX idx_messages_conversation ON messages(sender_id, receiver_id);
 CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
+CREATE INDEX idx_audit_logs_action ON audit_logs(action, created_at);

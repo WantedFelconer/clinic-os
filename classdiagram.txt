@@ -1,0 +1,663 @@
+Class: ClinicOS
+  - Aggregation:
+      * contains -> Server
+      * contains -> Client
+      * contains -> Database
+
+Class: Server (Express Application)
+  - Attributes:
+      + port: int = 5000
+      + env: String = "development"
+  - Methods:
+      + listen()
+      + useMiddleware()
+      + mountRoutes()
+  - Aggregation:
+      * contains -> Route
+      * contains -> Controller
+      * contains -> Model
+      * contains -> Middleware
+      * contains -> Config
+
+Class: Config
+  - Association:
+      * uses -> DatabasePool
+
+Class: DatabasePool
+  - Attributes:
+      + host: String = "localhost"
+      + port: int = 3306
+      + database: String = "clinic_os"
+      + connectionLimit: int = 20
+  - Methods:
+      + query()
+      + execute()
+      + getConnection()
+  - Association:
+      * usedBy -> Model
+      * usedBy -> Controller
+
+Class: Middleware
+  - Aggregation:
+      * contains -> AuthMiddleware
+      * contains -> RBACMiddleware
+      * contains -> ErrorHandler
+
+Class: AuthMiddleware
+  - Methods:
+      + authenticate(req, res, next)
+  - Dependency:
+      * uses -> JWT
+      * uses -> User
+
+Class: RBACMiddleware
+  - Methods:
+      + authorize(...roles)
+      + clinicAccess(req, res, next)
+  - Dependency:
+      * uses -> User
+      * uses -> ClinicStaff
+
+Class: ErrorHandler
+  - Methods:
+      + handleError(err, req, res, next)
+  - Association:
+      * mapsErrors -> MySQL error codes
+
+Class: Route
+  - Generalization:
+      * AuthRoutes (inherits Route)
+      * ClinicRoutes (inherits Route)
+      * PatientRoutes (inherits Route)
+      * AppointmentRoutes (inherits Route)
+      * MedicalRecordRoutes (inherits Route)
+      * PrescriptionRoutes (inherits Route)
+      * PaymentRoutes (inherits Route)
+      * ReviewRoutes (inherits Route)
+      * SubscriptionRoutes (inherits Route)
+      * AdminRoutes (inherits Route)
+
+Class: Controller
+  - Generalization:
+      * AuthController (inherits Controller)
+      * ClinicController (inherits Controller)
+      * PatientController (inherits Controller)
+      * AppointmentController (inherits Controller)
+      * MedicalRecordController (inherits Controller)
+      * PrescriptionController (inherits Controller)
+      * PaymentController (inherits Controller)
+      * ReviewController (inherits Controller)
+      * SubscriptionController (inherits Controller)
+      * AdminController (inherits Controller)
+  - Association:
+      * delegatesTo -> Model
+      * interceptedBy -> Middleware
+
+Class: Model (Data Access Object)
+  - Attributes:
+      + db: DatabasePool (mysql2 connection)
+  - Methods (common): create(), findById(), update()
+  - Generalization:
+      * User (inherits Model pattern)
+      * Clinic (inherits Model pattern)
+      * Patient (inherits Model pattern)
+      * Appointment (inherits Model pattern)
+      * MedicalRecord (inherits Model pattern)
+      * Prescription (inherits Model pattern)
+      * Payment (inherits Model pattern)
+      * Review (inherits Model pattern)
+      * Service (inherits Model pattern)
+      * Package (inherits Model pattern)
+      * Subscription (inherits Model pattern)
+      * Notification (inherits Model pattern)
+
+
+// ===== DOMAIN ENTITY CLASSES =====
+
+Class: User
+  - Attributes:
+      + id: UUID (PK)
+      + email: String (unique)
+      + password: String (bcrypt hashed)
+      + role: String {"patient", "doctor", "assistant", "admin"}
+      + firstName: String
+      + lastName: String
+      + phone: String
+      + avatarUrl: String
+      + isVerified: Boolean
+      + isActive: Boolean
+      + refreshToken: String
+      + resetPasswordToken: String
+      + resetPasswordExpires: DateTime
+  - Methods:
+      + create({ email, password, role, name, phone })
+      + findByEmail(email)
+      + findById(id)
+      + comparePassword(input, hashed)
+      + update(id, fields)
+      + updatePassword(id, newPassword)
+      + findByRole(role, page, limit)
+      + getAll(page, limit, search)
+      + setResetToken(email, token, expires)
+      + findByResetToken(token)
+      + clearResetToken(id)
+  - Association:
+      * owns -> Clinic
+      * worksAs -> ClinicStaff
+      * treatedAs -> Patient
+      * conducts -> Appointment
+      * writes -> MedicalRecord
+      * prescribes -> Prescription
+      * receives -> Review
+      * gets -> Notification
+      * sends -> Message
+      * generates -> AuditLog
+
+Class: Clinic
+  - Attributes:
+      + id: UUID (PK)
+      + ownerId: UUID (FK -> User)
+      + name: String
+      + slug: String (unique)
+      + description: String
+      + address: String
+      + city: String
+      + state: String
+      + country: String = "Bangladesh"
+      + postalCode: String
+      + latitude: Decimal
+      + longitude: Decimal
+      + phone: String
+      + email: String
+      + website: String
+      + logoUrl: String
+      + bannerUrl: String
+      + isActive: Boolean
+  - Methods:
+      + create({ owner_id, name, ... })
+      + findById(id)
+      + findByOwner(ownerId)
+      + findBySlug(slug)
+      + update(id, fields)
+      + search({ query, city, page, limit })
+      + getStaff(clinicId)
+      + getSchedules(clinicId)
+      + updateSchedules(clinicId, schedules)
+      + addStaff(clinicId, userId, role)
+      + removeStaff(clinicId, userId)
+  - Aggregation:
+      * contains -> ClinicStaff
+      * contains -> ClinicSchedule
+      * contains -> ClinicService
+      * contains -> ConsultationPackage
+  - Association:
+      * ownedBy -> User
+      * registers -> Patient
+      * hosts -> Appointment
+      * stores -> MedicalRecord
+      * issues -> Prescription
+      * processes -> Payment
+      * receives -> Review
+      * subscribesTo -> ClinicSubscription
+
+Class: ClinicStaff
+  - Attributes:
+      + id: UUID (PK)
+      + clinicId: UUID (FK -> Clinic)
+      + userId: UUID (FK -> User)
+      + role: String {"doctor", "assistant"}
+      + isActive: Boolean
+  - Association:
+      * belongsTo -> Clinic
+      * references -> User
+  - Note: Junction table (M:N between Clinic and User)
+
+Class: ClinicSchedule
+  - Attributes:
+      + id: UUID (PK)
+      + clinicId: UUID (FK -> Clinic)
+      + dayOfWeek: int (0-6)
+      + startTime: Time
+      + endTime: Time
+      + isAvailable: Boolean
+  - Association:
+      * belongsTo -> Clinic
+
+Class: ClinicService
+  - Attributes:
+      + id: UUID (PK)
+      + clinicId: UUID (FK -> Clinic)
+      + name: String
+      + description: String
+      + durationMinutes: int = 30
+      + price: Decimal
+      + isActive: Boolean
+  - Methods:
+      + create({ clinic_id, name, ... })
+      + findByClinic(clinicId)
+      + findById(id)
+      + update(id, fields)
+      + remove(id)
+  - Association:
+      * belongsTo -> Clinic
+      * referencedBy -> Appointment
+
+Class: ConsultationPackage
+  - Attributes:
+      + id: UUID (PK)
+      + clinicId: UUID (FK -> Clinic)
+      + name: String
+      + description: String
+      + sessionsCount: int
+      + price: Decimal
+      + isActive: Boolean
+  - Methods:
+      + create({ clinic_id, name, ... })
+      + findByClinic(clinicId)
+      + findById(id)
+      + update(id, fields)
+      + remove(id)
+  - Association:
+      * belongsTo -> Clinic
+
+Class: Patient
+  - Attributes:
+      + id: UUID (PK)
+      + userId: UUID (FK -> User, nullable)
+      + clinicId: UUID (FK -> Clinic)
+      + firstName: String
+      + lastName: String
+      + dateOfBirth: Date
+      + gender: String {"male", "female", "other"}
+      + phone: String
+      + email: String
+      + address: String
+      + bloodGroup: String
+      + allergies: String
+      + chronicConditions: String
+      + emergencyContactName: String
+      + emergencyContactPhone: String
+      + isActive: Boolean
+  - Methods:
+      + create({ clinic_id, first_name, ... })
+      + findById(id)
+      + findByUserId(userId, clinicId)
+      + findByClinic(clinicId, page, limit, search)
+      + update(id, fields)
+  - Association:
+      * mayHaveAccount -> User
+      * belongsTo -> Clinic
+      * attends -> Appointment
+      * hasRecords -> MedicalRecord
+      * receives -> Prescription
+      * pays -> Payment
+      * submits -> Review
+      * hasReports -> MedicalReport
+
+Class: Appointment
+  - Attributes:
+      + id: UUID (PK)
+      + clinicId: UUID (FK -> Clinic)
+      + patientId: UUID (FK -> Patient)
+      + doctorId: UUID (FK -> User)
+      + serviceId: UUID (FK -> ClinicService, nullable)
+      + appointmentDate: Date
+      + startTime: Time
+      + endTime: Time
+      + status: String {"scheduled", "confirmed", "in_progress",
+                          "completed", "cancelled", "no_show"}
+      + type: String {"in-person", "video", "phone"}
+      + notes: String
+      + cancellationReason: String
+  - Methods:
+      + create({ clinic_id, patient_id, ... })
+      + findById(id)
+      + findByClinic(clinicId, filters)
+      + findByPatient(patientId, page, limit)
+      + findByDoctor(doctorId, date, page, limit)
+      + updateStatus(id, status, reason)
+      + update(id, fields)
+      + getUpcoming(clinicId, limit)
+  - Association:
+      * scheduledAt -> Clinic
+      * involves -> Patient
+      * conductedBy -> User (doctor)
+      * usesService -> ClinicService
+      * generatesRecord -> MedicalRecord
+      * generatesPrescription -> Prescription
+      * billedIn -> Payment
+
+Class: MedicalRecord (EMR)
+  - Attributes:
+      + id: UUID (PK)
+      + patientId: UUID (FK -> Patient)
+      + clinicId: UUID (FK -> Clinic)
+      + doctorId: UUID (FK -> User)
+      + appointmentId: UUID (FK -> Appointment, nullable)
+      + diagnosis: String
+      + symptoms: String
+      + treatmentPlan: String
+      + notes: String
+      + followUpDate: Date
+      + isConfidential: Boolean
+  - Methods:
+      + create({ patient_id, clinic_id, ... })
+      + findById(id)
+      + findByPatient(patientId, page, limit)
+      + findByClinic(clinicId, page, limit)
+      + update(id, fields)
+  - Association:
+      * belongsTo -> Patient
+      * belongsTo -> Clinic
+      * authoredBy -> User (doctor)
+      * linkedTo -> Appointment
+
+Class: Prescription
+  - Attributes:
+      + id: UUID (PK)
+      + patientId: UUID (FK -> Patient)
+      + clinicId: UUID (FK -> Clinic)
+      + doctorId: UUID (FK -> User)
+      + appointmentId: UUID (FK -> Appointment, nullable)
+      + diagnosis: String
+      + notes: String
+      + isActive: Boolean
+  - Methods:
+      + create({ patient_id, clinic_id, ... })
+      + findById(id)
+      + findByPatient(patientId, page, limit)
+      + findByClinic(clinicId, page, limit)
+      + addItem({ prescription_id, medication_name, ... })
+      + getItems(prescriptionId)
+      + removeItem(itemId)
+      + getFullPrescription(id)
+  - Association:
+      * prescribedFor -> Patient
+      * issuedAt -> Clinic
+      * prescribedBy -> User (doctor)
+      * linkedTo -> Appointment
+  - Composition:
+      * contains -> PrescriptionItem
+
+Class: PrescriptionItem
+  - Attributes:
+      + id: UUID (PK)
+      + prescriptionId: UUID (FK -> Prescription)
+      + medicationName: String
+      + dosage: String
+      + frequency: String
+      + duration: String
+      + route: String = "oral"
+      + instructions: String
+      + isActive: Boolean
+  - Association:
+      * belongsTo -> Prescription
+
+Class: MedicalReport
+  - Attributes:
+      + id: UUID (PK)
+      + patientId: UUID (FK -> Patient)
+      + clinicId: UUID (FK -> Clinic)
+      + doctorId: UUID (FK -> User, nullable)
+      + reportType: String
+      + fileUrl: String
+      + description: String
+      + reportDate: Date
+  - Association:
+      * belongsTo -> Patient
+      * belongsTo -> Clinic
+      * uploadedBy -> User (doctor)
+
+Class: Payment
+  - Attributes:
+      + id: UUID (PK)
+      + clinicId: UUID (FK -> Clinic)
+      + patientId: UUID (FK -> Patient)
+      + appointmentId: UUID (FK -> Appointment, nullable)
+      + invoiceNumber: String (unique, auto-generated)
+      + amount: Decimal
+      + discount: Decimal = 0
+      + tax: Decimal = 0
+      + totalAmount: Decimal (computed)
+      + paymentMethod: String {"cash", "card", "online", "mobile_banking"}
+      + paymentStatus: String {"pending", "completed", "failed", "refunded"}
+      + transactionId: String
+      + paymentDate: DateTime
+      + notes: String
+  - Methods:
+      + create({ clinic_id, patient_id, ... })
+      + findById(id)
+      + findByClinic(clinicId, page, limit)
+      + findByPatient(patientId, page, limit)
+      + updateStatus(id, status, transactionId)
+      + getRevenue(clinicId, startDate, endDate)
+  - Association:
+      * collectedBy -> Clinic
+      * paidBy -> Patient
+      * settles -> Appointment
+
+Class: Review
+  - Attributes:
+      + id: UUID (PK)
+      + clinicId: UUID (FK -> Clinic)
+      + patientId: UUID (FK -> Patient)
+      + doctorId: UUID (FK -> User, nullable)
+      + rating: int (1-5)
+      + comment: String
+      + isApproved: Boolean = false
+  - Methods:
+      + create({ clinic_id, patient_id, ... })
+      + findByClinic(clinicId, page, limit)
+      + findByDoctor(doctorId, page, limit)
+      + approve(id)
+      + getPending(page, limit)
+      + remove(id)
+  - Association:
+      * targets -> Clinic
+      * submittedBy -> Patient
+      * rates -> User (doctor)
+
+Class: SubscriptionPlan
+  - Attributes:
+      + id: UUID (PK)
+      + name: String
+      + description: String
+      + price: Decimal
+      + billingCycle: String {"monthly", "quarterly", "yearly"}
+      + maxDoctors: int = 1
+      + maxPatients: int
+      + maxStaff: int = 0
+      + features: JSON (array)
+      + isActive: Boolean
+  - Methods:
+      + createPlan({ name, price, ... })
+      + getPlans(activeOnly)
+      + getPlanById(id)
+      + updatePlan(id, fields)
+  - Association:
+      * purchasedAs -> ClinicSubscription
+
+Class: ClinicSubscription
+  - Attributes:
+      + id: UUID (PK)
+      + clinicId: UUID (FK -> Clinic)
+      + planId: UUID (FK -> SubscriptionPlan)
+      + status: String {"active", "expired", "cancelled", "trial"}
+      + startDate: Date
+      + endDate: Date
+      + autoRenew: Boolean = true
+      + stripeSubscriptionId: String
+  - Methods:
+      + subscribe(clinicId, planId, billingCycle)
+      + getClinicSubscription(clinicId)
+      + cancelClinicSubscription(clinicId)
+      + getAllByAdmin(page, limit)
+  - Association:
+      * belongsTo -> Clinic
+      * selects -> SubscriptionPlan
+
+Class: Notification
+  - Attributes:
+      + id: UUID (PK)
+      + userId: UUID (FK -> User)
+      + title: String
+      + message: String
+      + type: String {"info", "success", "warning", "error"}
+      + referenceType: String
+      + referenceId: UUID
+      + isRead: Boolean = false
+  - Methods:
+      + create({ user_id, title, ... })
+      + findByUser(userId, page, limit)
+      + markAsRead(id, userId)
+      + markAllAsRead(userId)
+  - Association:
+      * targets -> User
+
+Class: Message
+  - Attributes:
+      + id: UUID (PK)
+      + senderId: UUID (FK -> User)
+      + receiverId: UUID (FK -> User)
+      + subject: String
+      + message: String
+      + isRead: Boolean = false
+  - Association:
+      * sentBy -> User (sender)
+      * receivedBy -> User (receiver)
+
+Class: AuditLog
+  - Attributes:
+      + id: UUID (PK)
+      + userId: UUID (FK -> User, nullable)
+      + action: String
+      + entityType: String
+      + entityId: UUID
+      + details: JSON
+      + ipAddress: String
+  - Association:
+      * recordedBy -> User
+
+
+// ===== CLIENT-SIDE CLASSES =====
+
+Class: Client (React Application)
+  - Aggregation:
+      * contains -> App
+      * contains -> ApiClient
+
+Class: App (SPA Shell)
+  - Attributes:
+      + currentView: String (state-driven routing)
+      + user: User (auth state)
+      + mockData: Array (inline development data)
+  - Methods:
+      + renderDashboard()
+      + renderPatients()
+      + renderAppointments()
+      + renderPrescriptions()
+      + renderPayments()
+  - Aggregation:
+      * contains -> Sidebar
+      * contains -> Dashboard
+      * contains -> PatientList
+      * contains -> AppointmentList
+      * contains -> PrescriptionList
+      * contains -> PaymentView
+      * contains -> UIComponent
+
+Class: ApiClient (Axios)
+  - Attributes:
+      + baseURL: String = "http://localhost:5000/api"
+      + authToken: String (from localStorage)
+  - Methods:
+      + interceptRequest(config) (attach JWT)
+      + interceptResponse(response, error) (handle 401)
+      + get()
+      + post()
+      + put()
+      + delete()
+  - Association:
+      * calls -> AuthApi
+      * calls -> ClinicsApi
+      * calls -> PatientsApi
+      * calls -> AppointmentsApi
+      * calls -> MedicalRecordsApi
+      * calls -> PrescriptionsApi
+      * calls -> PaymentsApi
+      * calls -> ReviewsApi
+      * calls -> SubscriptionsApi
+      * calls -> AdminApi
+
+Class: UIComponent (shadcn-style)
+  - Generalization:
+      * Button (inherits UIComponent)
+      * Card (inherits UIComponent)
+      * Dialog (inherits UIComponent)
+      * Form (inherits UIComponent)
+      * Calendar (inherits UIComponent)
+      * Chart (inherits UIComponent)
+      * Sidebar (inherits UIComponent)
+      * Table (inherits UIComponent)
+      * Tabs (inherits UIComponent)
+      * DropdownMenu (inherits UIComponent)
+      * Input (inherits UIComponent)
+      * Select (inherits UIComponent)
+      * Badge (inherits UIComponent)
+      * Avatar (inherits UIComponent)
+      * Tooltip (inherits UIComponent)
+      * Carousel (inherits UIComponent)
+      * ... (48+ total components)
+
+
+// ===== REQUEST FLOW =====
+
+HTTP Request
+  |
+  V
+Security Middleware (helmet -> cors -> rateLimit -> body parser)
+  |
+  V
+AuthMiddleware.authenticate() [JWT verification -> req.user]
+  |
+  V
+RBACMiddleware.authorize(roles) [role check]
+  |
+  V
+RBACMiddleware.clinicAccess() [staff membership check]
+  |
+  V
+Route -> Controller.method(req, res)
+  |
+  V
+Model.method() [DAO - mysql2 query]
+  |
+  V
+ErrorHandler.handleError(err, req, res, next) [MySQL error mapping]
+  |
+  V
+JSON Response
+
+
+// ===== KEY ARCHITECTURAL NOTES =====
+
+1. All server "models" are Plain Old JavaScript Objects (POJOs),
+   not ES6 classes or ORM entities.
+
+2. No TypeScript interfaces or classes on the server - all plain JS.
+
+3. Client has no page router - App.tsx (~3167 lines) renders
+   all views conditionally with inline mock data.
+
+4. Multi-tenant: all resources scoped under /api/clinics/:clinicId/*
+
+5. UUID v4 for all primary keys across all tables.
+
+6. Soft deletes via is_active boolean on User, Clinic, Patient,
+   Prescription, PrescriptionItem, etc.
+
+7. JWT authentication + role-based authorization (patient, doctor,
+   assistant, admin) + clinic staff membership validation.
+
+8. Database: 19 tables with CHECK constraints, foreign keys,
+   and composite unique keys enforcing domain rules.

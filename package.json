@@ -1,0 +1,11 @@
+{
+  "name": "clinic-os-root",
+  "version": "1.0.0",
+  "scripts": {
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev"
+  },
+  "dependencies": {
+    "docx": "^9.7.1"
+  }
+}

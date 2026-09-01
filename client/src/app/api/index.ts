@@ -1,4 +1,4 @@
-export { authApi, setAuthToken, getStoredUser, getStoredToken, isAuthenticated } from './auth';
+export { authApi, patientApi, setAuthToken, getStoredUser, getStoredToken, isAuthenticated } from './auth';
 export { clinicsApi } from './clinics';
 export { appointmentsApi } from './appointments';
 export { patientsApi } from './patients';
@@ -8,4 +8,6 @@ export { paymentsApi } from './payments';
 export { reviewsApi } from './reviews';
 export { subscriptionsApi } from './subscriptions';
 export { adminApi } from './admin';
+export { messagesApi } from './messages';
+export { doctorsApi } from './doctors';
 export { default as apiClient } from './client';

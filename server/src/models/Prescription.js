@@ -19,8 +19,8 @@ const Prescription = {
               c.name as clinic_name
        FROM prescriptions p
        JOIN patients pt ON p.patient_id = pt.id
-       JOIN users u ON p.doctor_id = u.id
-       JOIN clinics c ON p.clinic_id = c.id
+       LEFT JOIN users u ON p.doctor_id = u.id
+       LEFT JOIN clinics c ON p.clinic_id = c.id
        WHERE p.id = ?`,
       [id]
     );
@@ -32,8 +32,8 @@ const Prescription = {
     const [rows] = await db.execute(
       `SELECT p.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name, c.name as clinic_name
        FROM prescriptions p
-       JOIN users u ON p.doctor_id = u.id
-       JOIN clinics c ON p.clinic_id = c.id
+       LEFT JOIN users u ON p.doctor_id = u.id
+       LEFT JOIN clinics c ON p.clinic_id = c.id
        WHERE p.patient_id = ?
        ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
       [patientId, limit, offset]
@@ -42,19 +42,46 @@ const Prescription = {
     return { prescriptions: rows, total: parseInt(countRows[0].count, 10), page, limit };
   },
 
-  async findByClinic(clinicId, page = 1, limit = 20) {
+  async findByUserId(userId, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const [rows] = await db.execute(
       `SELECT p.*, pt.first_name as patient_first_name, pt.last_name as patient_last_name,
-              u.first_name as doctor_first_name, u.last_name as doctor_last_name
+              u.first_name as doctor_first_name, u.last_name as doctor_last_name, c.name as clinic_name
        FROM prescriptions p
        JOIN patients pt ON p.patient_id = pt.id
-       JOIN users u ON p.doctor_id = u.id
+       LEFT JOIN users u ON p.doctor_id = u.id
+       LEFT JOIN clinics c ON p.clinic_id = c.id
+       WHERE pt.user_id = ?
+       ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
+      [userId, limit, offset]
+    );
+    const [countRows] = await db.execute(
+      `SELECT COUNT(*) as count
+       FROM prescriptions p
+       JOIN patients pt ON p.patient_id = pt.id
+       WHERE pt.user_id = ?`,
+      [userId]
+    );
+    return { prescriptions: rows, total: parseInt(countRows[0]?.count || 0, 10), page, limit };
+  },
+
+  async findByClinic(clinicId, page = 1, limit = 20) {
+    const offset = (page - 1) * limit;
+    const [rows] = await db.execute(
+      `SELECT p.*, pt.first_name as patient_first_name, pt.last_name as patient_last_name, pt.phone as patient_phone,
+              u.first_name as doctor_first_name, u.last_name as doctor_last_name,
+              c.name as clinic_name,
+              (SELECT COUNT(*) FROM prescription_items pi WHERE pi.prescription_id = p.id) as items_count
+       FROM prescriptions p
+       JOIN patients pt ON p.patient_id = pt.id
+       LEFT JOIN users u ON p.doctor_id = u.id
+       LEFT JOIN clinics c ON p.clinic_id = c.id
        WHERE p.clinic_id = ?
        ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
       [clinicId, limit, offset]
     );
-    return { prescriptions: rows, page, limit };
+    const [countRows] = await db.execute('SELECT COUNT(*) as count FROM prescriptions WHERE clinic_id = ?', [clinicId]);
+    return { prescriptions: rows, total: parseInt(countRows[0]?.count, 10) || 0, page, limit };
   },
 
   async addItem({ prescription_id, medication_name, dosage, frequency, duration, route, instructions }) {
@@ -62,7 +89,7 @@ const Prescription = {
     await db.execute(
       `INSERT INTO prescription_items (id, prescription_id, medication_name, dosage, frequency, duration, route, instructions)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, prescription_id ?? null, medication_name ?? null, dosage ?? null, frequency ?? null, duration ?? null, route ?? null, instructions ?? null]
+      [id, prescription_id ?? null, medication_name ?? null, dosage || '1 tablet', frequency || 'Once daily', duration || '7 days', route || 'Oral', instructions ?? null]
     );
     const [rows] = await db.execute('SELECT * FROM prescription_items WHERE id = ?', [id]);
     return rows[0];

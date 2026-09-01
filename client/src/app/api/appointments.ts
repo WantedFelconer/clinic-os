@@ -9,5 +9,5 @@ export const appointmentsApi = {
   reschedule: (clinicId, id, data) =>
     apiClient.put(`/clinics/${clinicId}/appointments/${id}/reschedule`, data),
   getUpcoming: (clinicId) => apiClient.get(`/clinics/${clinicId}/appointments/upcoming`),
-  getMyAppointments: () => apiClient.get('/clinics/0/appointments/my'),
+  getMyAppointments: (page = 1) => apiClient.get(`/auth/appointments?page=${page}`),
 };

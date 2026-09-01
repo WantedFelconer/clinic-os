@@ -2,14 +2,20 @@ const db = require('../config/database');
 const { generateUUID } = require('../utils/helpers');
 
 const Review = {
-  async create({ clinic_id, patient_id, doctor_id, rating, comment }) {
+  async create({ clinic_id, patient_id, doctor_id, appointment_id, rating, comment }) {
     const id = generateUUID();
     await db.execute(
-      `INSERT INTO reviews (id, clinic_id, patient_id, doctor_id, rating, comment)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, clinic_id ?? null, patient_id ?? null, doctor_id ?? null, rating ?? null, comment ?? null]
+      `INSERT INTO reviews (id, clinic_id, patient_id, doctor_id, appointment_id, rating, comment)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, clinic_id ?? null, patient_id ?? null, doctor_id ?? null, appointment_id ?? null, rating ?? null, comment ?? null]
     );
     const [rows] = await db.execute('SELECT * FROM reviews WHERE id = ?', [id]);
+    return rows[0];
+  },
+
+  async findByAppointment(appointmentId) {
+    if (!appointmentId) return null;
+    const [rows] = await db.execute('SELECT * FROM reviews WHERE appointment_id = ?', [appointmentId]);
     return rows[0];
   },
 
@@ -53,12 +59,20 @@ const Review = {
   async getPending(page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const [rows] = await db.execute(
-      `SELECT r.*, p.first_name as patient_first_name, p.last_name as patient_last_name, c.name as clinic_name
-       FROM reviews r JOIN patients p ON r.patient_id = p.id JOIN clinics c ON r.clinic_id = c.id
-       WHERE r.is_approved = false ORDER BY r.created_at ASC LIMIT ? OFFSET ?`,
+      `SELECT r.*, p.first_name as patient_first_name, p.last_name as patient_last_name, c.name as clinic_name,
+              d.first_name as doctor_first_name, d.last_name as doctor_last_name
+       FROM reviews r
+       JOIN patients p ON r.patient_id = p.id
+       JOIN clinics c ON r.clinic_id = c.id
+       LEFT JOIN users d ON r.doctor_id = d.id
+       WHERE r.is_approved = 0 OR r.is_approved IS FALSE
+       ORDER BY r.created_at ASC LIMIT ? OFFSET ?`,
       [limit, offset]
     );
-    return { reviews: rows, page, limit };
+    const [countRows] = await db.execute(
+      'SELECT COUNT(*) as count FROM reviews WHERE is_approved = 0 OR is_approved IS FALSE'
+    );
+    return { reviews: rows, total: parseInt(countRows[0]?.count || 0, 10), page, limit };
   },
 
   async remove(id) {

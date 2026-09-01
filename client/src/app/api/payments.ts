@@ -7,5 +7,5 @@ export const paymentsApi = {
   updateStatus: (clinicId, id, status, transaction_id) =>
     apiClient.put(`/clinics/${clinicId}/payments/${id}/status`, { status, transaction_id }),
   getRevenue: (clinicId, params) => apiClient.get(`/clinics/${clinicId}/payments/revenue`, { params }),
-  getMyPayments: () => apiClient.get('/clinics/0/payments/my'),
+  getMyPayments: (page = 1) => apiClient.get(`/auth/payments?page=${page}`),
 };
