@@ -10,6 +10,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
 const useSsl =
   process.env.DB_SSL === 'true' ||
   process.env.DB_SSL === '1' ||
+  (process.env.DB_HOST && process.env.DB_HOST.includes('aivencloud.com')) ||
   (process.env.NODE_ENV === 'production' &&
     process.env.DB_HOST &&
     !['localhost', '127.0.0.1'].includes(process.env.DB_HOST));

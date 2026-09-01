@@ -10,19 +10,35 @@ async function migrate() {
   const dbPassword = process.env.DB_PASSWORD || '';
   const dbName = process.env.DB_NAME || 'clinic_os';
 
-  // 1. Connect to MySQL server to ensure database exists
-  const initialConnection = await mysql.createConnection({
-    host: dbHost,
-    port: dbPort,
-    user: dbUser,
-    password: dbPassword,
-  });
+  const useSsl =
+    process.env.DB_SSL === 'true' ||
+    process.env.DB_SSL === '1' ||
+    dbHost.includes('aivencloud.com') ||
+    (process.env.NODE_ENV === 'production' && !['localhost', '127.0.0.1'].includes(dbHost));
 
+  const ssl = useSsl
+    ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' }
+    : undefined;
+
+  // 1. Connect to MySQL server to ensure database exists
+  let initialConnection;
   try {
+    initialConnection = await mysql.createConnection({
+      host: dbHost,
+      port: dbPort,
+      user: dbUser,
+      password: dbPassword,
+      ...(ssl ? { ssl } : {}),
+    });
+
     await initialConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
     console.log(`Database '${dbName}' verified/created.`);
+  } catch (err) {
+    console.warn(`Note on initial connection / CREATE DATABASE: ${err.message}`);
   } finally {
-    await initialConnection.end();
+    if (initialConnection) {
+      await initialConnection.end();
+    }
   }
 
   // 2. Connect to the specific database
@@ -33,6 +49,7 @@ async function migrate() {
     user: dbUser,
     password: dbPassword,
     multipleStatements: true,
+    ...(ssl ? { ssl } : {}),
   });
 
   try {
