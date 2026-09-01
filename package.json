@@ -1,11 +1,39 @@
 {
-  "name": "clinic-os-root",
+  "name": "clinic-os",
   "version": "1.0.0",
+  "private": true,
+  "description": "ClinicOS - Fullstack Multi-Tenant Clinic Management System",
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
-    "server": "cd server && npm run dev",
-    "client": "cd client && npm run dev"
+    "build": "npm run build --prefix client",
+    "build:client": "npm run build --prefix client",
+    "vercel-build": "npm run build --prefix client",
+    "client": "npm run dev --prefix client",
+    "server": "npm run dev --prefix server",
+    "dev": "npm run dev --prefix client",
+    "start": "node server/src/index.js",
+    "test": "npm run test --prefix server"
   },
   "dependencies": {
-    "docx": "^9.7.1"
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "docx": "^9.7.1",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "express-validator": "^7.2.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.11.0",
+    "stripe": "^17.0.0",
+    "uuid": "^10.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
