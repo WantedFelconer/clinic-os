@@ -90,20 +90,12 @@ const appointmentController = {
       let doctorId = req.body.doctor_id;
 
       // 1. Doctor verification
-      if (doctorId) {
-        const isDocValid = await validateDoctorClinicMembership(doctorId, clinicId);
-        if (!isDocValid) {
-          return res.status(400).json({ message: 'Selected doctor is not registered or active in this clinic.' });
-        }
-      } else {
-        // If doctor_id is not specified, assign the clinic's primary doctor
-        const staff = await Clinic.getStaff(clinicId);
-        const doc = staff.find((s) => s.role === 'doctor' && s.is_active);
-        if (doc) doctorId = doc.user_id || doc.id;
-      }
-
       if (!doctorId) {
-        return res.status(400).json({ message: 'No active doctor is available for this appointment.' });
+        return res.status(400).json({ message: 'Doctor selection is required.' });
+      }
+      const isDocValid = await validateDoctorClinicMembership(doctorId, clinicId);
+      if (!isDocValid) {
+        return res.status(400).json({ message: 'Selected doctor is not registered or active in this clinic.' });
       }
 
       // 2. Service verification
@@ -125,10 +117,10 @@ const appointmentController = {
             ...profile,
             user_id: req.user.id,
             clinic_id: clinicId,
-            first_name: req.user.first_name,
-            last_name: req.user.last_name,
-            email: req.user.email,
-            phone: req.user.phone,
+            first_name: req.user.first_name || profile.first_name,
+            last_name: req.user.last_name || profile.last_name,
+            email: req.user.email || profile.email,
+            phone: req.user.phone || profile.phone,
           });
         }
         patientId = patient.id;
@@ -139,7 +131,7 @@ const appointmentController = {
           return res.status(400).json({ message: 'Patient selection is required.' });
         }
         const patient = await Patient.findById(patientId);
-        if (!patient || patient.clinic_id !== clinicId) {
+        if (!patient || patient.clinic_id !== clinicId || !patient.is_active) {
           return res.status(400).json({ message: 'Selected patient does not belong to this clinic.' });
         }
       }

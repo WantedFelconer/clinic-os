@@ -29,6 +29,9 @@ export function BookAppointmentModal({
   appointmentDate?: string;
   onSuccess: () => void;
 }) {
+  const authenticatedUser = getStoredUser();
+  const isPatient = authenticatedUser?.role === "patient";
+  const patientName = [authenticatedUser?.first_name, authenticatedUser?.last_name].filter(Boolean).join(" ");
   const [form, setForm] = useState({
     patient_id: patientId || "",
     doctor_id: doctorId || "",
@@ -60,7 +63,6 @@ export function BookAppointmentModal({
 
   useEffect(() => {
     if (open && clinicId && clinicId !== "0") {
-      const isPatient = getStoredUser()?.role === "patient";
       setLoadingOptions(true);
       Promise.all([
         clinicsApi.getServices(clinicId),
@@ -73,8 +75,8 @@ export function BookAppointmentModal({
         setPatients(patientRes?.data?.patients || []);
         setForm(f => ({
           ...f,
-          patient_id: isPatient ? "" : (patientId || f.patient_id),
-          doctor_id: doctorId || (availableDoctors.some((d: any) => d.doctor_id === f.doctor_id) ? f.doctor_id : availableDoctors[0]?.doctor_id || ""),
+          patient_id: isPatient ? (patientId || "") : (patientId || f.patient_id),
+          doctor_id: doctorId || "",
           start_time: "",
           end_time: "",
         }));
@@ -83,7 +85,7 @@ export function BookAppointmentModal({
     } else if (open) {
       setError("Please select a clinic before booking an appointment.");
     }
-  }, [open, clinicId, doctorId, patientId]);
+  }, [open, clinicId, doctorId, patientId, isPatient]);
 
   useEffect(() => {
     if (!open || !clinicId || clinicId === "0" || !form.doctor_id || !form.appointment_date) {
@@ -109,7 +111,6 @@ export function BookAppointmentModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const isPatient = getStoredUser()?.role === "patient";
     if (!clinicId || clinicId === "0" || clinicId === "undefined") {
       setError("Please select a clinic before booking an appointment.");
       return;
@@ -155,10 +156,10 @@ export function BookAppointmentModal({
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
           {error && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl font-medium flex items-center gap-2"><AlertCircle size={14} className="flex-shrink-0" /> {error}</div>}
 
-          {getStoredUser()?.role === "patient" ? (
+          {isPatient ? (
             <div className="rounded-xl border border-teal-100 bg-teal-50 px-4 py-3">
-              <p className="text-xs font-semibold text-teal-800">Patient</p>
-              <p className="text-sm font-bold text-slate-900">Booking for yourself</p>
+              <p className="text-xs font-semibold text-teal-800 flex items-center gap-1.5"><User size={14} /> Patient</p>
+              <p className="text-sm font-bold text-slate-900">Booking for yourself{patientName ? ` (${patientName})` : ""}</p>
             </div>
           ) : <div>
             <label htmlFor="booking-patient" className="block text-xs font-semibold text-slate-600 mb-1.5">Patient *</label>
@@ -181,8 +182,11 @@ export function BookAppointmentModal({
             <select id="booking-doctor" value={form.doctor_id} disabled={loadingOptions}
               onChange={e => setForm(f => ({ ...f, doctor_id: e.target.value, start_time: "", end_time: "" }))}
               className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50" required>
-              <option value="">{loadingOptions ? "Loading doctors..." : "Select a doctor"}</option>
-              {doctors.map((doctor: any) => <option key={doctor.doctor_id} value={doctor.doctor_id}>Dr. {doctor.first_name} {doctor.last_name} — {doctor.specialization || "General Medicine"}</option>)}
+              <option value="">{loadingOptions ? "Loading doctors..." : "-- Select Doctor --"}</option>
+              {doctors.map((doctor: any) => {
+                const id = doctor.doctor_id || doctor.user_id;
+                return <option key={id} value={id}>Dr. {doctor.first_name} {doctor.last_name} — {doctor.specialization || "General Medicine"}</option>;
+              })}
             </select>
           </div>
 
@@ -207,7 +211,7 @@ export function BookAppointmentModal({
                 type="date"
                 min={localDate()}
                 value={form.appointment_date}
-                onChange={e => setForm(f => ({ ...f, appointment_date: e.target.value }))}
+                onChange={e => setForm(f => ({ ...f, appointment_date: e.target.value, start_time: "", end_time: "" }))}
                 className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />

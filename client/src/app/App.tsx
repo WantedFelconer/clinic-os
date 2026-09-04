@@ -3814,7 +3814,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                   <Btn variant="outline" size="sm" onClick={() => setSection("p-discovery")}>
                     <Search size={14} /> Find Clinics
                   </Btn>
-                  <Btn variant="teal" onClick={() => { setBookingClinicId(patientProfile?.clinic_id || "0"); setShowBookModal(true); }}>
+                  <Btn variant="teal" onClick={() => { setBookingClinicId(patientProfile?.clinic_id || "0"); setBookingDoctorId(""); setShowBookModal(true); }}>
                     <Plus size={14} /> Book Appointment
                   </Btn>
                 </div>
@@ -3905,7 +3905,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                         <Calendar size={28} className="mx-auto text-slate-300 mb-2" />
                         <p className="text-xs text-slate-500 font-medium">No upcoming appointments</p>
                         <button
-                          onClick={() => { setBookingClinicId(patientProfile?.clinic_id || "0"); setShowBookModal(true); }}
+                          onClick={() => { setBookingClinicId(patientProfile?.clinic_id || "0"); setBookingDoctorId(""); setShowBookModal(true); }}
                           className="mt-2 text-xs text-teal-600 font-bold hover:underline"
                         >
                           Book an appointment now
@@ -4166,7 +4166,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                       </button>
                     ))}
                   </div>
-                  <Btn variant="teal" size="sm" onClick={() => { setBookingClinicId(patientProfile?.clinic_id || "0"); setShowBookModal(true); }}>
+                  <Btn variant="teal" size="sm" onClick={() => { setBookingClinicId(patientProfile?.clinic_id || "0"); setBookingDoctorId(""); setShowBookModal(true); }}>
                     <Plus size={13} /> Book New
                   </Btn>
                 </div>
@@ -4647,7 +4647,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
         open={showBookModal}
         onClose={() => setShowBookModal(false)}
         clinicId={bookingClinicId || patientProfile?.clinic_id || "0"}
-        doctorId={bookingDoctorId}
+        doctorId={bookingDoctorId || ""}
         appointmentDate={discoveryDate}
         patientId={patientProfile?.id}
         onSuccess={() => {

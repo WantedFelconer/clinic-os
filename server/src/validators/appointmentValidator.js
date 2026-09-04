@@ -32,9 +32,11 @@ const appointmentValidator = {
       .isIn(['in-person', 'video', 'phone'])
       .withMessage('Type must be in-person, video, or phone'),
     body('doctor_id')
-      .optional({ checkFalsy: true })
       .trim()
-      .notEmpty(),
+      .notEmpty()
+      .withMessage('Doctor selection is required')
+      .matches(/^[A-Za-z0-9-]{1,36}$/)
+      .withMessage('Doctor ID is invalid'),
     body('patient_id')
       .optional({ checkFalsy: true })
       .trim(),
