@@ -2,7 +2,7 @@ process.env.NODE_ENV = 'test';
 const http = require('http');
 const assert = require('assert');
 const app = require('../src/index');
-const db = require('../src/config/database');
+const db = require('../src/core/config/database');
 
 const TEST_PORT = 5098;
 let server;

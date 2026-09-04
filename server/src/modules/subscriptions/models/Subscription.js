@@ -1,0 +1,337 @@
+const db = require('../../../core/config/database');
+const { generateUUID } = require('../../../core/utils/helpers');
+const { canonicalFeature, normalizeFeatureSet } = require('../../../core/config/features');
+
+function normalizeFeatures(features) {
+  return normalizeFeatureSet(features);
+}
+
+function parsePlan(plan) {
+  if (!plan) return null;
+  const rawFeatures = plan.features;
+  const structuredFeatures = normalizeFeatures(rawFeatures);
+
+  let featureList = [];
+  if (Array.isArray(rawFeatures)) {
+    featureList = rawFeatures;
+  } else if (typeof rawFeatures === 'string') {
+    try {
+      const parsed = JSON.parse(rawFeatures);
+      featureList = Array.isArray(parsed) ? parsed : Object.keys(parsed).filter(k => parsed[k]);
+    } catch {
+      featureList = rawFeatures ? [rawFeatures] : [];
+    }
+  } else if (typeof rawFeatures === 'object' && rawFeatures !== null) {
+    featureList = Object.keys(rawFeatures).filter(k => rawFeatures[k]);
+  }
+
+  return {
+    ...plan,
+    price: parseFloat(plan.price) || 0,
+    max_doctors: plan.max_doctors !== null && plan.max_doctors !== undefined ? parseInt(plan.max_doctors, 10) : null,
+    max_patients: plan.max_patients !== null && plan.max_patients !== undefined ? parseInt(plan.max_patients, 10) : null,
+    max_staff: plan.max_staff !== null && plan.max_staff !== undefined ? parseInt(plan.max_staff, 10) : null,
+    features: featureList,
+    structured_features: structuredFeatures,
+  };
+}
+
+const Subscription = {
+  // Plans
+  async createPlan({ name, description, price, billing_cycle, max_doctors, max_patients, max_staff, features, is_active = true }) {
+    const id = generateUUID();
+    const safeFeatures = Array.isArray(features) || typeof features === 'object'
+      ? JSON.stringify(features)
+      : (features ? JSON.stringify([features]) : '[]');
+
+    await db.execute(
+      `INSERT INTO subscription_plans (id, name, description, price, billing_cycle, max_doctors, max_patients, max_staff, features, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        name ?? null,
+        description ?? null,
+        price !== undefined ? parseFloat(price) : 0,
+        billing_cycle ?? 'monthly',
+        max_doctors !== undefined && max_doctors !== null ? parseInt(max_doctors, 10) : 1,
+        max_patients !== undefined && max_patients !== null ? parseInt(max_patients, 10) : 100,
+        max_staff !== undefined && max_staff !== null ? parseInt(max_staff, 10) : 2,
+        safeFeatures,
+        is_active ? 1 : 0,
+      ]
+    );
+    return this.getPlanById(id);
+  },
+
+  async getPlans(activeOnly = true) {
+    let query = 'SELECT * FROM subscription_plans';
+    if (activeOnly) query += ' WHERE is_active = 1 OR is_active = true';
+    query += ' ORDER BY price ASC';
+    const [rows] = await db.execute(query);
+    return rows.map(parsePlan);
+  },
+
+  async getPlanById(id) {
+    const [rows] = await db.execute('SELECT * FROM subscription_plans WHERE id = ?', [id]);
+    return parsePlan(rows[0]);
+  },
+
+  async updatePlan(id, fields) {
+    const allowedFields = ['name', 'description', 'price', 'billing_cycle', 'max_doctors', 'max_patients', 'max_staff', 'features', 'is_active'];
+    const updates = [];
+    const values = [];
+
+    for (const [key, value] of Object.entries(fields)) {
+      if (allowedFields.includes(key)) {
+        updates.push(`${key} = ?`);
+        if (key === 'features') {
+          values.push(Array.isArray(value) || typeof value === 'object' ? JSON.stringify(value) : (value ? JSON.stringify([value]) : '[]'));
+        } else if (key === 'is_active') {
+          values.push(value ? 1 : 0);
+        } else if (key === 'price') {
+          values.push(parseFloat(value) || 0);
+        } else if (['max_doctors', 'max_patients', 'max_staff'].includes(key)) {
+          values.push(value !== null && value !== undefined ? parseInt(value, 10) : null);
+        } else {
+          values.push(value ?? null);
+        }
+      }
+    }
+
+    if (updates.length === 0) return this.getPlanById(id);
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(id);
+
+    await db.execute(
+      `UPDATE subscription_plans SET ${updates.join(', ')} WHERE id = ?`,
+      values
+    );
+    return this.getPlanById(id);
+  },
+
+  async deletePlan(id) {
+    // Non-destructive soft deactivation
+    await db.execute('UPDATE subscription_plans SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+    return true;
+  },
+
+  // Clinic subscriptions (Simulated)
+  async subscribe(clinicId, planId, billingCycle = 'monthly') {
+    const plan = await this.getPlanById(planId);
+    if (!plan) throw new Error('Subscription plan not found.');
+
+    let days = 30;
+    if (billingCycle === 'quarterly') days = 90;
+    else if (billingCycle === 'yearly') days = 365;
+
+    const id = generateUUID();
+    const startDate = new Date();
+    const endDate = new Date(Date.now() + days * 86400000);
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+
+    await db.transaction(async (connection) => {
+      await connection.execute(
+        `UPDATE clinic_subscriptions SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE clinic_id = ? AND status = 'active'`,
+        [clinicId]
+      );
+      await connection.execute(
+        `INSERT INTO clinic_subscriptions (id, clinic_id, plan_id, status, start_date, end_date, auto_renew)
+         VALUES (?, ?, ?, 'active', ?, ?, 1)`,
+        [id, clinicId, planId, startDateStr, endDateStr]
+      );
+    });
+    return this.getClinicSubscription(clinicId);
+  },
+
+  async getClinicSubscription(clinicId) {
+    // Automatically expire active subscriptions that have passed their end_date
+    await db.execute(
+      `UPDATE clinic_subscriptions SET status = 'expired', updated_at = CURRENT_TIMESTAMP
+       WHERE clinic_id = ? AND status = 'active' AND end_date < CURRENT_DATE`,
+      [clinicId]
+    );
+
+    const [rows] = await db.execute(
+      `SELECT cs.*, sp.name as plan_name, sp.price, sp.features, sp.billing_cycle, sp.max_doctors, sp.max_patients, sp.max_staff
+       FROM clinic_subscriptions cs
+       JOIN subscription_plans sp ON cs.plan_id = sp.id
+       WHERE cs.clinic_id = ? AND cs.status = 'active' AND cs.end_date >= CURRENT_DATE
+       ORDER BY cs.created_at DESC LIMIT 1`,
+      [clinicId]
+    );
+
+    if (!rows[0]) {
+      // Default Starter Free tier fallback
+      const defaultFeatures = ['Basic Scheduling', 'EMR Notes', 'Digital Prescriptions', 'Secure Messaging'];
+      return {
+        clinic_id: clinicId,
+        status: 'active',
+        plan_name: 'Starter (Free Tier)',
+        price: 0,
+        max_doctors: 1,
+        max_patients: 100,
+        max_staff: 2,
+        features: defaultFeatures,
+        structured_features: normalizeFeatures(defaultFeatures),
+        is_default: true,
+      };
+    }
+
+    const sub = rows[0];
+    const structured = normalizeFeatures(sub.features);
+    let featureList = [];
+    if (typeof sub.features === 'string') {
+      try { featureList = JSON.parse(sub.features); } catch { featureList = []; }
+    } else if (Array.isArray(sub.features)) {
+      featureList = sub.features;
+    }
+
+    return {
+      ...sub,
+      price: parseFloat(sub.price) || 0,
+      features: Array.isArray(featureList) ? featureList : Object.keys(structured),
+      structured_features: structured,
+    };
+  },
+
+  async getLatestClinicSubscription(clinicId) {
+    const [rows] = await db.execute(
+      `SELECT cs.*, sp.name as plan_name, sp.price, sp.features, sp.billing_cycle,
+              sp.max_doctors, sp.max_patients, sp.max_staff
+       FROM clinic_subscriptions cs JOIN subscription_plans sp ON sp.id = cs.plan_id
+       WHERE cs.clinic_id = ? ORDER BY cs.end_date DESC, cs.created_at DESC LIMIT 1`,
+      [clinicId]
+    );
+    if (!rows[0]) return null;
+    const parsed = parsePlan(rows[0]);
+    return { ...parsed, structured_features: normalizeFeatures(rows[0].features), is_default: false };
+  },
+
+  async cancelClinicSubscription(clinicId) {
+    const [active] = await db.execute(
+      "SELECT id FROM clinic_subscriptions WHERE clinic_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+      [clinicId]
+    );
+    if (!active[0]) return null;
+    const subId = active[0].id;
+    await db.execute(
+      `UPDATE clinic_subscriptions SET status = 'cancelled', auto_renew = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [subId]
+    );
+    const [rows] = await db.execute('SELECT * FROM clinic_subscriptions WHERE id = ?', [subId]);
+    return rows[0];
+  },
+
+  async checkClinicLimits(clinicId) {
+    const sub = await this.getClinicSubscription(clinicId);
+    const [patientCount] = await db.execute('SELECT COUNT(*) as count FROM patients WHERE clinic_id = ?', [clinicId]);
+    const [staffCount] = await db.execute('SELECT COUNT(*) as count FROM clinic_staff WHERE clinic_id = ?', [clinicId]);
+    const [doctorCount] = await db.execute("SELECT COUNT(*) as count FROM clinic_staff WHERE clinic_id = ? AND role = 'doctor'", [clinicId]);
+
+    const currPatients = parseInt(patientCount[0]?.count || 0, 10);
+    const currStaff = parseInt(staffCount[0]?.count || 0, 10);
+    const currDoctors = parseInt(doctorCount[0]?.count || 0, 10) + 1; // +1 for owner doctor
+
+    const maxPatients = sub.max_patients !== null && sub.max_patients !== undefined ? parseInt(sub.max_patients, 10) : null;
+    const maxStaff = sub.max_staff !== null && sub.max_staff !== undefined ? parseInt(sub.max_staff, 10) : null;
+    const maxDoctors = sub.max_doctors !== null && sub.max_doctors !== undefined ? parseInt(sub.max_doctors, 10) : null;
+
+    const patientsAllowed = maxPatients === null || currPatients < maxPatients;
+    const staffAllowed = maxStaff === null || currStaff < maxStaff;
+    const doctorsAllowed = maxDoctors === null || currDoctors <= maxDoctors;
+
+    return {
+      plan_name: sub.plan_name,
+      patients: { current: currPatients, max: maxPatients, allowed: patientsAllowed },
+      staff: { current: currStaff, max: maxStaff, allowed: staffAllowed },
+      doctors: { current: currDoctors, max: maxDoctors, allowed: doctorsAllowed },
+    };
+  },
+
+  async hasFeature(clinicId, featureName) {
+    const sub = await this.getClinicSubscription(clinicId);
+    if (!sub) return false;
+    const cleanKey = canonicalFeature(featureName);
+    const structured = sub.structured_features || normalizeFeatures(sub.features);
+
+    return Boolean(structured[cleanKey]);
+  },
+
+  async getAllByAdmin(page = 1, limit = 20) {
+    const offset = (page - 1) * limit;
+    const [rows] = await db.execute(
+      `SELECT cs.*, c.name as clinic_name, sp.name as plan_name, sp.price as plan_price, sp.billing_cycle as plan_billing_cycle
+       FROM clinic_subscriptions cs
+       JOIN clinics c ON cs.clinic_id = c.id
+       JOIN subscription_plans sp ON cs.plan_id = sp.id
+       ORDER BY cs.created_at DESC LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    const [countRows] = await db.execute('SELECT COUNT(*) as count FROM clinic_subscriptions');
+    return {
+      subscriptions: rows.map(r => ({ ...r, plan_price: parseFloat(r.plan_price) || 0 })),
+      total: parseInt(countRows[0]?.count || 0, 10),
+      page,
+      limit,
+    };
+  },
+
+  async getSubscriptionAnalytics() {
+    const [activeSubs] = await db.execute(
+      `SELECT cs.*, sp.name as plan_name, sp.price, sp.billing_cycle
+       FROM clinic_subscriptions cs
+       JOIN subscription_plans sp ON cs.plan_id = sp.id
+       WHERE cs.status = 'active'`
+    );
+
+    let mrr = 0;
+    const planCounts = {};
+
+    for (const sub of activeSubs) {
+      const price = parseFloat(sub.price) || 0;
+      const cycle = sub.billing_cycle || 'monthly';
+      if (cycle === 'monthly') mrr += price;
+      else if (cycle === 'quarterly') mrr += price / 3;
+      else if (cycle === 'yearly') mrr += price / 12;
+      else mrr += price;
+
+      planCounts[sub.plan_name] = (planCounts[sub.plan_name] || 0) + 1;
+    }
+
+    const [totalCount] = await db.execute('SELECT COUNT(*) as count FROM clinic_subscriptions');
+    const [plans] = await db.execute('SELECT * FROM subscription_plans WHERE is_active = 1');
+
+    return {
+      mrr: Math.round(mrr * 100) / 100,
+      active_subscriptions: activeSubs.length,
+      total_subscriptions: parseInt(totalCount[0]?.count || 0, 10),
+      plan_distribution: Object.entries(planCounts).map(([name, count]) => ({ name, count })),
+      available_plans: plans.map(parsePlan),
+    };
+  },
+
+  async renewSubscription(clinicId) {
+    const [subscriptions] = await db.execute(
+      `SELECT cs.*, sp.billing_cycle FROM clinic_subscriptions cs
+       JOIN subscription_plans sp ON cs.plan_id = sp.id
+       WHERE cs.clinic_id = ? ORDER BY cs.end_date DESC LIMIT 1`,
+      [clinicId]
+    );
+    const current = subscriptions[0];
+    if (!current) return null;
+    const days = current.billing_cycle === 'yearly' ? 365 : current.billing_cycle === 'quarterly' ? 90 : 30;
+    const today = new Date();
+    const oldEnd = new Date(`${current.end_date}T00:00:00`);
+    const base = oldEnd > today ? oldEnd : today;
+    const newEnd = new Date(base.getTime() + days * 86400000).toISOString().slice(0, 10);
+    await db.execute(
+      `UPDATE clinic_subscriptions SET status = 'active', start_date = CASE WHEN end_date < CURRENT_DATE THEN CURRENT_DATE ELSE start_date END,
+       end_date = ?, auto_renew = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [newEnd, current.id]
+    );
+    return this.getClinicSubscription(clinicId);
+  },
+};
+
+module.exports = Subscription;
