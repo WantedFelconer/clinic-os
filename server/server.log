@@ -1,0 +1,2 @@
+ClinicOS server running on port 5000
+Health check: http://localhost:5000/api/health
