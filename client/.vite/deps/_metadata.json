@@ -1,0 +1,52 @@
+{
+  "hash": "47f46f85",
+  "configHash": "84ff162d",
+  "lockfileHash": "ea3d88ca",
+  "browserHash": "9a936d61",
+  "optimized": {
+    "react": {
+      "src": "../../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "c43f0aee",
+      "needsInterop": true
+    },
+    "lucide-react": {
+      "src": "../../../node_modules/lucide-react/dist/esm/lucide-react.js",
+      "file": "lucide-react.js",
+      "fileHash": "0d6ecfe6",
+      "needsInterop": false
+    },
+    "recharts": {
+      "src": "../../../node_modules/recharts/es6/index.js",
+      "file": "recharts.js",
+      "fileHash": "d2e1ad13",
+      "needsInterop": false
+    },
+    "jspdf": {
+      "src": "../../../node_modules/jspdf/dist/jspdf.es.min.js",
+      "file": "jspdf.js",
+      "fileHash": "ee80b7dd",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-S7PAVP2U": {
+      "file": "chunk-S7PAVP2U.js"
+    },
+    "html2canvas.esm-IAGSEELO": {
+      "file": "html2canvas__esm-IAGSEELO.js"
+    },
+    "purify.es-KWIMYJ6D": {
+      "file": "purify__es-KWIMYJ6D.js"
+    },
+    "index.es-G6IPU3U6": {
+      "file": "index__es-G6IPU3U6.js"
+    },
+    "chunk-JRJ5JSPZ": {
+      "file": "chunk-JRJ5JSPZ.js"
+    },
+    "chunk-DC5AMYBS": {
+      "file": "chunk-DC5AMYBS.js"
+    }
+  }
+}
