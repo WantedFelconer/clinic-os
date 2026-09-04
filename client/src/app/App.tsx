@@ -2,20 +2,20 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   authApi, patientApi, setAuthToken, getStoredUser, getStoredToken, isAuthenticated,
   clinicsApi, appointmentsApi, patientsApi, medicalRecordsApi,
-  prescriptionsApi, paymentsApi, reviewsApi, subscriptionsApi, adminApi, messagesApi,
+  prescriptionsApi, paymentsApi, reviewsApi, subscriptionsApi, adminApi, messagesApi, doctorsApi, getApiErrorMessage,
 } from "./api";
 import {
   BookAppointmentModal, RescheduleModal, CancelAppointmentModal,
   CreateEMRModal, CreatePrescriptionModal, ViewPrescriptionModal, ViewMedicalRecordModal,
   CreateServiceModal, EditServiceModal, CreatePackageModal,
   AddPatientModal, CreateInvoiceModal, PayInvoiceModal, SubmitReviewModal,
-  SendMessageModal, AddStaffModal,
+  SendMessageModal, AddStaffModal, UploadMedicalReportModal,
 } from "./components/ActionModals";
 import {
   LayoutDashboard, Calendar, Users, FileText, Pill, BarChart3,
   Settings, Bell, Search, Plus, Star, CheckCircle, Clock,
   TrendingUp, ArrowRight, Menu, X, Stethoscope, LogOut,
-  ChevronRight, Filter, Eye, Edit, Trash2,
+  ChevronRight, ChevronLeft, Filter, Eye, Edit, Trash2,
   Download, Phone, Mail, Package, CreditCard, Lock, Upload,
   ChevronDown, Check, Globe, Video, DollarSign, Sparkles,
   Shield, Building2, AlertCircle, MapPin, MessageSquare,
@@ -34,6 +34,17 @@ import {
 // ── Design Tokens ──────────────────────────────────────────────────────────────
 
 const CHART_COLORS = ["#2563EB", "#14B8A6", "#22C55E", "#F59E0B", "#8B5CF6", "#EC4899"];
+
+const localDateString = (date = new Date()) => {
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 10);
+};
+
+const shiftDate = (date: string, days: number) => {
+  const value = new Date(`${date}T12:00:00`);
+  value.setDate(value.getDate() + days);
+  return localDateString(value);
+};
 
 // ── Design System ──────────────────────────────────────────────────────────────
 
@@ -59,11 +70,11 @@ function Badge({ variant = "default", children }: { variant?: BadgeVariant; chil
 
 type BtnVariant = "primary" | "secondary" | "outline" | "ghost" | "danger" | "white" | "teal";
 
-function Btn({ variant = "primary", size = "md", children, onClick, className = "" }: {
+function Btn({ variant = "primary", size = "md", children, onClick, className = "", disabled = false }: {
   variant?: BtnVariant; size?: "sm" | "md" | "lg";
-  children: React.ReactNode; onClick?: () => void; className?: string;
+  children: React.ReactNode; onClick?: () => void; className?: string; disabled?: boolean;
 }) {
-  const base = "inline-flex items-center gap-2 font-medium rounded-xl transition-all cursor-pointer";
+  const base = "inline-flex items-center gap-2 font-medium rounded-xl transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
   const sizes = { sm: "px-3 py-1.5 text-sm", md: "px-4 py-2 text-sm", lg: "px-6 py-3 text-base" };
   const variants: Record<BtnVariant, string> = {
     primary:   "bg-blue-600 text-white hover:bg-blue-700 shadow-sm",
@@ -75,7 +86,7 @@ function Btn({ variant = "primary", size = "md", children, onClick, className = 
     teal:      "bg-teal-600 text-white hover:bg-teal-700 shadow-sm",
   };
   return (
-    <button onClick={onClick} className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}>
+    <button type="button" disabled={disabled} onClick={onClick} className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}>
       {children}
     </button>
   );
@@ -439,7 +450,7 @@ function LandingCTA({ onStart }: { onStart: () => void }) {
         <p className="text-blue-200 text-lg mb-10">Experience ClinicOS — the modern workspace for clinical practices.</p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <Btn variant="white" size="lg" onClick={onStart}>Start Free — No Credit Card <ArrowRight size={16} /></Btn>
-          <button onClick={onStart} className="text-blue-200 hover:text-white text-sm font-medium transition-colors">Schedule a Demo →</button>
+          <button onClick={onStart} className="text-blue-200 hover:text-white text-sm font-medium transition-colors">Get Started →</button>
         </div>
       </div>
     </section>
@@ -499,25 +510,20 @@ function LandingPage({ onLogin, onStart, onPatientPortal, onAdmin }: {
       <FAQ />
       <LandingCTA onStart={onStart} />
       <LandingFooter onLogin={onLogin} />
-      {/* Dev nav */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-50">
-        <button onClick={onPatientPortal} className="bg-teal-600 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg hover:bg-teal-700 transition-colors">Patient Portal Demo</button>
-        <button onClick={onAdmin} className="bg-slate-800 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg hover:bg-slate-700 transition-colors">Admin Panel Demo</button>
-      </div>
     </div>
   );
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────────
 
-function AuthPage({ onSuccess, onBack }: { onSuccess: (token: string, user: any) => void; onBack: () => void }) {
+function AuthPage({ onSuccess, onBack, notice }: { onSuccess: (token: string, user: any) => void; onBack: () => void; notice?: string }) {
   const [mode, setMode] = useState<"login" | "register" | "forgot" | "verify">("login");
-  const [role, setRole] = useState<"doctor" | "patient">("doctor");
+  const [role, setRole] = useState<"doctor" | "patient" | "admin">("doctor");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [sent, setSent] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(notice || "");
   const [submitting, setSubmitting] = useState(false);
   const [verified, setVerified] = useState(false);
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
@@ -605,11 +611,14 @@ function AuthPage({ onSuccess, onBack }: { onSuccess: (token: string, user: any)
     try {
       if (mode === "login") {
         const { data } = await authApi.login({ email, password });
-        if (role === "doctor" && !["doctor", "assistant", "admin"].includes(data.user.role)) {
+        if (role === "doctor" && !["doctor", "assistant"].includes(data.user.role)) {
           return setError(`This account is a ${data.user.role}. Switch to the Patient tab.`);
         }
-        if (role === "patient" && !["patient", "admin"].includes(data.user.role)) {
+        if (role === "patient" && data.user.role !== "patient") {
           return setError(`This account is a ${data.user.role}. Switch to the Doctor tab.`);
+        }
+        if (role === "admin" && data.user.role !== "admin") {
+          return setError("This account does not have platform administrator access.");
         }
         onSuccess(data.token, data.user);
       } else if (mode === "register") {
@@ -738,10 +747,10 @@ function AuthPage({ onSuccess, onBack }: { onSuccess: (token: string, user: any)
                 <h1 className="text-2xl font-bold text-slate-900 mb-1">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
                 <p className="text-slate-500 text-sm mb-6">{mode === "login" ? "Sign in to your ClinicOS account" : "Start your 14-day free trial — no card needed"}</p>
                 <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-6">
-                  {(["doctor", "patient"] as const).map(r => (
+                  {(mode === "login" ? (["doctor", "patient", "admin"] as const) : (["doctor", "patient"] as const)).map(r => (
                     <button key={r} onClick={() => setRole(r)}
                       className={`flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-all ${role === r ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
-                      {r === "doctor" ? "Doctor" : "Patient"}
+                      {r === "doctor" ? "Doctor" : r === "patient" ? "Patient" : "Admin"}
                     </button>
                   ))}
                 </div>
@@ -773,7 +782,7 @@ function AuthPage({ onSuccess, onBack }: { onSuccess: (token: string, user: any)
                 </div>
                 <p className="text-center text-sm text-slate-500 mt-6">
                   {mode === "login"
-                    ? <>Don&apos;t have an account? <button onClick={() => setMode("register")} className="text-blue-600 font-medium hover:text-blue-700">Sign up free</button></>
+                      ? role === "admin" ? <>Administrator accounts are provisioned by the platform.</> : <>Don&apos;t have an account? <button onClick={() => { setRole(role === "patient" ? "patient" : "doctor"); setMode("register"); }} className="text-blue-600 font-medium hover:text-blue-700">Sign up free</button></>
                     : <>Already have an account? <button onClick={() => setMode("login")} className="text-blue-600 font-medium hover:text-blue-700">Sign in</button></>}
                 </p>
               </>
@@ -862,208 +871,6 @@ function ResetPasswordPage({ onBackToLogin }: { onBackToLogin: () => void }) {
     </div>
   );
 }
-
-// ── Onboarding Wizard ───────────────────────────────────────────────────────────
-
-function OnboardingPage({ onFinish }: { onFinish: () => void }) {
-  const [step, setStep] = useState(0);
-  const [hours, setHours] = useState<Record<string, boolean>>({ Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: false, Sun: false });
-  const steps = ["Welcome", "Clinic Details", "Location & Hours", "Services & Fees", "All Done!"];
-  const progress = ((step) / (steps.length - 1)) * 100;
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl">
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-6">
-            <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center"><Stethoscope size={17} className="text-white" /></div>
-            <span className="font-bold text-slate-900 text-xl">Clinic<span className="text-blue-600">OS</span></span>
-          </div>
-          <div className="flex items-center gap-2 mb-3">
-            {steps.map((s, i) => (
-              <div key={i} className="flex items-center gap-2 flex-1">
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all ${i < step ? "bg-blue-600 text-white" : i === step ? "bg-blue-600 text-white ring-4 ring-blue-100" : "bg-slate-200 text-slate-400"}`}>
-                  {i < step ? <Check size={13} /> : i + 1}
-                </div>
-                {i < steps.length - 1 && <div className={`h-0.5 flex-1 rounded-full transition-all ${i < step ? "bg-blue-600" : "bg-slate-200"}`} />}
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-slate-400">Step {step + 1} of {steps.length} — {steps[step]}</p>
-        </div>
-
-        <Card className="p-8">
-          {step === 0 && (
-            <div className="text-center py-4">
-              <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                <Sparkles size={36} className="text-blue-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-slate-900 mb-3">Welcome to ClinicOS!</h2>
-              <p className="text-slate-500 leading-relaxed max-w-md mx-auto mb-8">
-                You are just a few steps away from launching your digital clinic. We will help you set up everything — it takes less than 5 minutes.
-              </p>
-              <div className="grid grid-cols-3 gap-4 mb-8">
-                {[{ Icon: Building2, label: "Create Clinic" }, { Icon: Users, label: "Manage Patients" }, { Icon: BarChart3, label: "Track Revenue" }].map(item => (
-                  <div key={item.label} className="p-4 bg-slate-50 rounded-2xl text-center">
-                    <item.Icon size={22} className="text-blue-600 mx-auto mb-2" />
-                    <p className="text-xs font-semibold text-slate-700">{item.label}</p>
-                  </div>
-                ))}
-              </div>
-              <Btn variant="primary" size="lg" onClick={() => setStep(1)}>Get Started <ArrowRight size={16} /></Btn>
-            </div>
-          )}
-
-          {step === 1 && (
-            <div>
-              <h2 className="text-xl font-bold text-slate-900 mb-1">Clinic Details</h2>
-              <p className="text-slate-500 text-sm mb-6">Tell us about your clinic. This will be displayed on your public profile.</p>
-              <div className="space-y-4">
-                <div className="flex items-center gap-5 p-4 bg-slate-50 rounded-2xl mb-6">
-                  <div className="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <Building2 size={24} className="text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900 mb-1">Clinic Logo</p>
-                    <p className="text-xs text-slate-500 mb-2">Upload a logo to personalize your clinic profile</p>
-                    <Btn variant="outline" size="sm"><Upload size={12} /> Upload Logo</Btn>
-                  </div>
-                </div>
-                {[{ label: "Clinic Name", ph: "e.g. Smith Family Clinic", val: "Smith Family Clinic" }, { label: "Tagline", ph: "A short tagline for your clinic", val: "Quality Care for Every Family" }, { label: "Specialization", ph: "e.g. General Practice, Cardiology", val: "General Practice" }].map(f => (
-                  <div key={f.label}>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{f.label}</label>
-                    <input defaultValue={f.val} placeholder={f.ph} className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                ))}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Consultation Fee (USD)</label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                    <input defaultValue="75" type="number" className="w-full pl-8 pr-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div>
-              <h2 className="text-xl font-bold text-slate-900 mb-1">Location & Working Hours</h2>
-              <p className="text-slate-500 text-sm mb-6">Add your clinic address and set your availability schedule.</p>
-              <div className="space-y-4 mb-6">
-                {[{ label: "Street Address", ph: "123 Medical Drive, Suite 4B", val: "" }, { label: "City", ph: "New York", val: "" }].map(f => (
-                  <div key={f.label}>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{f.label}</label>
-                    <input placeholder={f.ph} className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                ))}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">State</label>
-                    <input placeholder="NY" className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">ZIP Code</label>
-                    <input placeholder="10001" className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-              </div>
-              <div className="bg-slate-50 rounded-2xl p-4">
-                <p className="text-xs font-semibold text-slate-700 mb-3">Working Days</p>
-                <div className="space-y-2">
-                  {Object.entries(hours).map(([day, active]) => (
-                    <div key={day} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
-                      <div className="flex items-center gap-3">
-                        <Toggle checked={active} onChange={() => setHours(h => ({ ...h, [day]: !h[day] }))} />
-                        <span className="text-sm font-medium text-slate-700">{day}</span>
-                      </div>
-                      {active && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          <select className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"><option>09:00 AM</option><option>08:00 AM</option><option>10:00 AM</option></select>
-                          <span>—</span>
-                          <select className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"><option>05:00 PM</option><option>06:00 PM</option><option>04:00 PM</option></select>
-                        </div>
-                      )}
-                      {!active && <span className="text-xs text-slate-400">Closed</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div>
-              <h2 className="text-xl font-bold text-slate-900 mb-1">Services & Qualification</h2>
-              <p className="text-slate-500 text-sm mb-6">Add the services you offer. You can always add more later.</p>
-              <div className="space-y-3 mb-6">
-                {[{ name: "General Consultation", duration: "30 min", fee: "75" }, { name: "Follow-up Visit", duration: "20 min", fee: "45" }].map((s, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-                    <div className="flex-1 grid grid-cols-3 gap-2">
-                      <input defaultValue={s.name} className="col-span-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                      <input defaultValue={s.duration} className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                        <input defaultValue={s.fee} className="w-full pl-6 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                      </div>
-                    </div>
-                    <button className="text-red-400 hover:text-red-600 p-1 transition-colors"><Trash2 size={14} /></button>
-                  </div>
-                ))}
-                <button className="w-full flex items-center justify-center gap-2 text-sm text-blue-600 font-medium py-3 border-2 border-dashed border-blue-200 rounded-xl hover:bg-blue-50 transition-colors">
-                  <Plus size={14} /> Add Service
-                </button>
-              </div>
-              <div className="space-y-4">
-                <h3 className="text-sm font-bold text-slate-700">Professional Credentials</h3>
-                {[{ label: "Medical License Number", ph: "MD-XXXXXXX" }, { label: "Qualification", ph: "e.g. MBBS, MD" }, { label: "Years of Experience", ph: "e.g. 10" }].map(f => (
-                  <div key={f.label}>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{f.label}</label>
-                    <input placeholder={f.ph} className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="text-center py-4">
-              <div className="w-20 h-20 bg-green-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                <CheckCircle size={40} className="text-green-500" />
-              </div>
-              <h2 className="text-2xl font-bold text-slate-900 mb-3">Your clinic is ready!</h2>
-              <p className="text-slate-500 leading-relaxed max-w-md mx-auto mb-8">
-                Smith Family Clinic has been created successfully. You can now start managing appointments, patients, and grow your practice with ClinicOS.
-              </p>
-              <div className="grid grid-cols-2 gap-3 mb-8">
-                {[{ Icon: Calendar, title: "Book first appt", desc: "Add your first appointment" }, { Icon: Users, title: "Add patients", desc: "Start your patient list" }, { Icon: Package, title: "Create package", desc: "Bundle your services" }, { Icon: Globe, title: "View public profile", desc: "See how patients find you" }].map(item => (
-                  <div key={item.title} className="p-4 bg-slate-50 rounded-2xl text-left">
-                    <item.Icon size={18} className="text-blue-600 mb-2" />
-                    <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                    <p className="text-xs text-slate-400">{item.desc}</p>
-                  </div>
-                ))}
-              </div>
-              <Btn variant="primary" size="lg" onClick={onFinish}>Go to Dashboard <ArrowRight size={16} /></Btn>
-            </div>
-          )}
-
-          {step < 4 && (
-            <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-50">
-              <Btn variant="ghost" size="sm" onClick={() => setStep(Math.max(0, step - 1))} className={step === 0 ? "invisible" : ""}>
-                <ChevronRight size={14} className="rotate-180" /> Back
-              </Btn>
-              <Btn variant="primary" onClick={() => setStep(step + 1)}>
-                {step === 3 ? "Finish Setup" : "Continue"} <ArrowRight size={14} />
-              </Btn>
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
-
 // ── Doctor Dashboard ─────────────────────────────────────────────────────────────
 
 const NAV_GROUPS = [
@@ -1071,7 +878,7 @@ const NAV_GROUPS = [
     label: "Practice",
     items: [
       { id: "overview",      label: "Overview",      Icon: LayoutDashboard, badge: null },
-      { id: "appointments",  label: "Appointments",  Icon: Calendar,        badge: "6" },
+      { id: "appointments",  label: "Appointments",  Icon: Calendar,        badge: null },
       { id: "patients",      label: "Patients",      Icon: Users,           badge: null },
       { id: "emr",           label: "Medical Records",Icon: ClipboardList,  badge: null },
     ],
@@ -1095,7 +902,8 @@ const NAV_GROUPS = [
     label: "Insights",
     items: [
       { id: "analytics",     label: "Analytics",     Icon: BarChart3,       badge: null },
-      { id: "notifications", label: "Notifications", Icon: Bell,            badge: "3" },
+      { id: "reviews",       label: "Reviews",       Icon: Star,            badge: null },
+      { id: "notifications", label: "Notifications", Icon: Bell,            badge: null },
       { id: "settings",      label: "Settings",      Icon: Settings,        badge: null },
     ],
   },
@@ -1139,26 +947,28 @@ function Sidebar({ section, setSection, onLogout, user, clinics, selectedClinic,
       <div className="px-3 py-2 border-b border-gray-50 relative" ref={clinicRef}>
         {clinics && clinics.length > 0 ? (
           <>
-            <div onClick={() => setClinicOpen(v => !v)} className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-colors ${clinicOpen ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+            <button type="button" aria-haspopup="menu" aria-expanded={clinicOpen} onClick={() => setClinicOpen(v => !v)} className={`w-full flex items-center gap-3 p-2 rounded-xl text-left transition-colors ${clinicOpen ? "bg-blue-50" : "hover:bg-slate-50"}`}>
               <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 font-semibold text-[11px] flex items-center justify-center flex-shrink-0">{clinicInitials}</div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-slate-900 truncate">{clinicName}</p>
                 <p className="text-[10px] text-slate-400 truncate">{clinics.length} clinic{clinics.length > 1 ? "s" : ""}</p>
               </div>
-              {clinics.length > 1 && <ChevronDown size={12} className={`text-slate-400 flex-shrink-0 transition-transform ${clinicOpen ? "rotate-180" : ""}`} />}
-            </div>
-            {clinicOpen && clinics.length > 1 && (
-              <div className="absolute left-3 right-3 top-full mt-0.5 bg-white border border-gray-100 rounded-xl shadow-lg z-50 overflow-hidden">
+              <ChevronDown size={12} className={`text-slate-400 flex-shrink-0 transition-transform ${clinicOpen ? "rotate-180" : ""}`} />
+            </button>
+            {clinicOpen && (
+              <div role="menu" className="absolute left-3 right-3 top-full mt-0.5 bg-white border border-gray-100 rounded-xl shadow-lg z-50 overflow-hidden">
+                <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Clinics</p>
                 {clinics.map(c => (
-                  <button key={c.id} onClick={() => { onSwitchClinic?.(c); setClinicOpen(false); }}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left transition-colors ${c.id === selectedClinic?.id ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-600 hover:bg-slate-50"}`}>
+                  <button role="menuitem" key={c.id} disabled={!c.is_active} onClick={() => { onSwitchClinic?.(c); setClinicOpen(false); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${c.id === selectedClinic?.id ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-600 hover:bg-slate-50"}`}>
                     <div className="w-5 h-5 rounded bg-slate-100 text-slate-500 font-semibold text-[9px] flex items-center justify-center flex-shrink-0">
                       {c.name.split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase()}
                     </div>
-                    <span className="flex-1 truncate">{c.name}</span>
+                    <span className="flex-1 min-w-0"><span className="block truncate">{c.name}</span><span className="block text-[10px] font-normal text-slate-400 truncate">{c.city || "Location not set"}{!c.is_active ? " · Suspended" : ""}</span></span>
                     {c.id === selectedClinic?.id && <Check size={11} className="text-blue-600 flex-shrink-0" />}
                   </button>
                 ))}
+                <button role="menuitem" type="button" onClick={() => { setSection("clinic"); setClinicOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2.5 border-t border-gray-100 text-xs font-semibold text-blue-700 hover:bg-blue-50"><Settings size={12} /> Manage Clinics</button>
               </div>
             )}
           </>
@@ -1272,7 +1082,7 @@ function TopBar({ section, setSection, cmdOpen, setCmdOpen, user }: { section: s
       await authApi.markAllNotificationsRead();
       setNotifs(n => n.map(x => ({ ...x, is_read: 1, read: true })));
     } catch {
-      setNotifs(n => n.map(x => ({ ...x, is_read: 1, read: true })));
+      alert("Unable to mark notifications as read.");
     }
   };
 
@@ -1280,7 +1090,7 @@ function TopBar({ section, setSection, cmdOpen, setCmdOpen, user }: { section: s
     try {
       await authApi.markNotificationRead(n.id);
       setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, is_read: 1, read: true } : x));
-    } catch {}
+    } catch { alert("Unable to mark this notification as read."); }
   };
 
   const initials = `${user?.first_name?.[0] || 'D'}${user?.last_name?.[0] || 'R'}`.toUpperCase();
@@ -1365,15 +1175,14 @@ function OverviewView({ setSection, selectedClinic }: { setSection: (s: string) 
   const [revenueTrends, setRevenueTrends] = useState<any[]>([]);
   const [visitDistribution, setVisitDistribution] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const user = getStoredUser();
 
   const fetchDashboardData = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
-      let clinic = selectedClinic;
-      if (!clinic) {
-        const myClinics = await clinicsApi.getMyClinics();
-        clinic = myClinics.data.clinics?.[0] || myClinics.data?.[0];
-      }
+      const clinic = selectedClinic;
       if (clinic?.id) {
         const dashRes = await clinicsApi.getDashboard(clinic.id);
         const statsData = dashRes.data?.stats || {};
@@ -1405,12 +1214,17 @@ function OverviewView({ setSection, selectedClinic }: { setSection: (s: string) 
         if (dashRes.data?.visit_types?.length) {
           setVisitDistribution(dashRes.data.visit_types);
         } else {
-          setVisitDistribution([
-            { name: "In-Person", value: 100, count: 1 }
-          ]);
+          setVisitDistribution([]);
         }
+      } else {
+        setStats({ total_patients: 0, upcoming_appointments: 0, total_revenue: 0, packages_sold: 0 });
+        setTodayAppts([]);
+        setRevenueTrends([]);
+        setVisitDistribution([]);
       }
-    } catch {} finally {
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError, "Unable to load this clinic dashboard."));
+    } finally {
       setLoading(false);
     }
   }, [selectedClinic]);
@@ -1424,12 +1238,14 @@ function OverviewView({ setSection, selectedClinic }: { setSection: (s: string) 
 
   return (
     <div className="p-8 space-y-7">
+      {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+      {!selectedClinic?.id && <div role="status" className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">Create or select an active clinic to begin managing your practice.</div>}
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-xl font-bold text-slate-900">{greeting}, Dr. {user?.first_name || "Doctor"} 👋</h2>
           <p className="text-slate-500 text-sm mt-0.5">{today} · {stats.upcoming_appointments} upcoming appointments</p>
         </div>
-        <Btn variant="primary" onClick={() => setSection("appointments")}><Plus size={14} /> New Appointment</Btn>
+        <Btn variant="primary" disabled={!selectedClinic?.id || loading} onClick={() => setSection("appointments")}><Plus size={14} /> New Appointment</Btn>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -1470,8 +1286,8 @@ function OverviewView({ setSection, selectedClinic }: { setSection: (s: string) 
           <h3 className="font-semibold text-slate-900 mb-5">Consultation Types</h3>
           <ResponsiveContainer width="100%" height={160}>
             <PieChart>
-              <Pie data={visitDistribution.length > 0 ? visitDistribution : [{ name: "In-Person", value: 100 }]} cx="50%" cy="50%" innerRadius={44} outerRadius={68} dataKey="value" paddingAngle={3}>
-                {(visitDistribution.length > 0 ? visitDistribution : [{ name: "In-Person", value: 100 }]).map((_, i) => (
+              <Pie data={visitDistribution} cx="50%" cy="50%" innerRadius={44} outerRadius={68} dataKey="value" paddingAngle={3}>
+                {visitDistribution.map((_, i) => (
                   <Cell key={`overview-visit-${i}`} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                 ))}
               </Pie>
@@ -1479,6 +1295,7 @@ function OverviewView({ setSection, selectedClinic }: { setSection: (s: string) 
             </PieChart>
           </ResponsiveContainer>
           <div className="mt-5 space-y-2.5">
+            {visitDistribution.length === 0 && <p className="text-center text-xs text-slate-400">No consultation data yet</p>}
             {visitDistribution.map((d, i) => (
               <div key={d.name} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
@@ -1523,6 +1340,7 @@ function OverviewView({ setSection, selectedClinic }: { setSection: (s: string) 
 
 function AppointmentsView({ selectedClinic }: { selectedClinic?: any }) {
   const [filter, setFilter] = useState("all");
+  const [selectedDate, setSelectedDate] = useState(localDateString());
   const [showBookModal, setShowBookModal] = useState(false);
   const [selectedApptForReschedule, setSelectedApptForReschedule] = useState<any>(null);
   const [selectedApptForCancel, setSelectedApptForCancel] = useState<any>(null);
@@ -1531,13 +1349,16 @@ function AppointmentsView({ selectedClinic }: { selectedClinic?: any }) {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchAppts = useCallback(async () => {
     if (selectedClinic?.id) {
       setLoading(true);
+      setError("");
       try {
         const res = await appointmentsApi.getByClinic(selectedClinic.id, {
           status: filter === "all" ? undefined : filter.toLowerCase().replace(" ", "_"),
+          date: selectedDate || undefined,
           limit: 100,
         });
         if (res.data?.appointments) {
@@ -1560,11 +1381,11 @@ function AppointmentsView({ selectedClinic }: { selectedClinic?: any }) {
             color: "bg-blue-100 text-blue-700",
           })));
         }
-      } catch {} finally {
+      } catch (requestError) { setAppointments([]); setError(getApiErrorMessage(requestError, "Unable to load appointments.")); } finally {
         setLoading(false);
       }
-    }
-  }, [selectedClinic, filter]);
+    } else { setAppointments([]); setLoading(false); }
+  }, [selectedClinic, filter, selectedDate]);
 
   useEffect(() => { fetchAppts(); }, [fetchAppts]);
 
@@ -1592,8 +1413,38 @@ function AppointmentsView({ selectedClinic }: { selectedClinic?: any }) {
     a.phone.includes(search)
   );
 
+  const calendarDays = Array.from({ length: 7 }, (_, index) => shiftDate(selectedDate || localDateString(), index - 3));
+
   return (
     <div className="p-8 space-y-6">
+      <Card className="p-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Appointment calendar</h2>
+            <p className="text-xs text-slate-500">Select a day to view its live schedule.</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <button type="button" aria-label="Previous week" onClick={() => setSelectedDate(shiftDate(selectedDate || localDateString(), -7))} className="p-2 rounded-lg border border-gray-200 text-slate-600 hover:bg-slate-50"><ChevronLeft size={15} /></button>
+            <button type="button" onClick={() => setSelectedDate(localDateString())} className="px-3 py-2 rounded-lg border border-gray-200 text-xs font-semibold text-slate-700 hover:bg-slate-50">Today</button>
+            <button type="button" aria-label="Next week" onClick={() => setSelectedDate(shiftDate(selectedDate || localDateString(), 7))} className="p-2 rounded-lg border border-gray-200 text-slate-600 hover:bg-slate-50"><ChevronRight size={15} /></button>
+          </div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {calendarDays.map(date => {
+            const parsed = new Date(`${date}T12:00:00`);
+            const active = date === selectedDate;
+            const today = date === localDateString();
+            return <button type="button" key={date} onClick={() => setSelectedDate(date)} aria-pressed={active}
+              className={`min-w-[76px] flex-1 rounded-xl border px-3 py-2.5 text-center transition-colors ${active ? "border-blue-600 bg-blue-600 text-white" : "border-gray-200 bg-white text-slate-600 hover:border-blue-300"}`}>
+              <span className="block text-[10px] font-semibold uppercase">{parsed.toLocaleDateString(undefined, { weekday: "short" })}</span>
+              <span className="block text-lg font-bold leading-6">{parsed.getDate()}</span>
+              <span className={`block text-[10px] ${active ? "text-blue-100" : today ? "font-bold text-blue-600" : "text-slate-400"}`}>{today ? "Today" : parsed.toLocaleDateString(undefined, { month: "short" })}</span>
+            </button>;
+          })}
+        </div>
+        <button type="button" onClick={() => setSelectedDate("")} className={`mt-3 text-xs font-semibold ${selectedDate ? "text-blue-600" : "text-slate-900"}`}>Show all dates</button>
+      </Card>
+
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           {filters.map(f => (
@@ -1603,10 +1454,11 @@ function AppointmentsView({ selectedClinic }: { selectedClinic?: any }) {
             </button>
           ))}
         </div>
-        <Btn variant="primary" onClick={() => setShowBookModal(true)}><Plus size={14} /> Book Appointment</Btn>
+        <Btn variant="primary" disabled={!selectedClinic?.id} onClick={() => setShowBookModal(true)}><Plus size={14} /> Book Appointment</Btn>
       </div>
 
       <Card>
+        {error && <div role="alert" className="m-5 p-3 rounded-xl bg-rose-50 text-rose-700 text-xs font-semibold">{error}</div>}
         <div className="p-6 border-b border-gray-50 flex items-center justify-between flex-wrap gap-3">
           <h3 className="font-semibold text-slate-900">{filtered.length} appointments listed</h3>
           <div className="relative">
@@ -1621,7 +1473,7 @@ function AppointmentsView({ selectedClinic }: { selectedClinic?: any }) {
         </div>
 
         <div className="divide-y divide-gray-50">
-          {filtered.length === 0 ? (
+          {loading ? <div role="status" className="p-10 text-center text-sm text-slate-400">Loading appointments...</div> : filtered.length === 0 ? (
             <div className="p-10 text-center text-sm text-slate-400">
               No appointments found matching this filter. Click &quot;Book Appointment&quot; to schedule one.
             </div>
@@ -1712,6 +1564,7 @@ function AppointmentsView({ selectedClinic }: { selectedClinic?: any }) {
         open={showBookModal}
         onClose={() => setShowBookModal(false)}
         clinicId={selectedClinic?.id || "0"}
+        appointmentDate={selectedDate || undefined}
         onSuccess={fetchAppts}
       />
 
@@ -1736,6 +1589,7 @@ function AppointmentsView({ selectedClinic }: { selectedClinic?: any }) {
         onClose={() => setSelectedApptForRx(null)}
         clinicId={selectedClinic?.id || "0"}
         patientId={selectedApptForRx?.patient_id}
+        appointmentId={selectedApptForRx?.id}
         onSuccess={fetchAppts}
       />
 
@@ -1757,6 +1611,7 @@ function PatientDetail({ patient, clinicId, onBack }: { patient: any; clinicId: 
   const [showRxModal, setShowRxModal] = useState(false);
   const [showEmrModal, setShowEmrModal] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [viewRx, setViewRx] = useState<any>(null);
 
   const fetchHistory = useCallback(async () => {
@@ -1765,7 +1620,7 @@ function PatientDetail({ patient, clinicId, onBack }: { patient: any; clinicId: 
       try {
         const res = await patientsApi.getHistory(clinicId, patient.id);
         setHistory(res.data);
-      } catch {} finally {
+      } catch (requestError) { setHistory(null); alert(getApiErrorMessage(requestError, "Unable to load patient history.")); } finally {
         setLoading(false);
       }
     }
@@ -1776,6 +1631,7 @@ function PatientDetail({ patient, clinicId, onBack }: { patient: any; clinicId: 
   }, [fetchHistory]);
 
   const pData = history?.patient || patient;
+  const canEditClinical = getStoredUser()?.role === 'doctor';
   const initials = `${pData.first_name?.[0] || 'P'}${pData.last_name?.[0] || 'T'}`.toUpperCase();
 
   return (
@@ -1806,8 +1662,9 @@ function PatientDetail({ patient, clinicId, onBack }: { patient: any; clinicId: 
           </div>
           <div className="flex gap-2">
             <Btn variant="outline" size="sm" onClick={() => setShowBookModal(true)}><Calendar size={12} /> Schedule</Btn>
-            <Btn variant="outline" size="sm" onClick={() => setShowEmrModal(true)}><FileText size={12} /> Add EMR</Btn>
-            <Btn variant="primary" size="sm" onClick={() => setShowRxModal(true)}><Pill size={12} /> Prescribe</Btn>
+            {canEditClinical && <Btn variant="outline" size="sm" onClick={() => setShowEmrModal(true)}><FileText size={12} /> Add EMR</Btn>}
+            <Btn variant="outline" size="sm" onClick={() => setShowReportModal(true)}><Upload size={12} /> Report</Btn>
+            {canEditClinical && <Btn variant="primary" size="sm" onClick={() => setShowRxModal(true)}><Pill size={12} /> Prescribe</Btn>}
           </div>
         </div>
       </Card>
@@ -1874,7 +1731,7 @@ function PatientDetail({ patient, clinicId, onBack }: { patient: any; clinicId: 
         <Card className="p-6 space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="font-semibold text-slate-900">Medical Records (EMR)</h3>
-            <Btn variant="primary" size="sm" onClick={() => setShowEmrModal(true)}><Plus size={12} /> Add Record</Btn>
+            {canEditClinical && <Btn variant="primary" size="sm" onClick={() => setShowEmrModal(true)}><Plus size={12} /> Add Record</Btn>}
           </div>
           {(history?.medical_records || []).length === 0 ? (
             <p className="text-xs text-slate-400 py-6 text-center">No medical records created yet</p>
@@ -1894,6 +1751,8 @@ function PatientDetail({ patient, clinicId, onBack }: { patient: any; clinicId: 
               </div>
             ))
           )}
+          <div className="pt-4 border-t border-gray-100 flex justify-between items-center"><h3 className="font-semibold text-slate-900">Medical Reports</h3><Btn variant="outline" size="sm" onClick={() => setShowReportModal(true)}><Upload size={12}/> Upload Report</Btn></div>
+          {(history?.medical_reports || []).map((report: any) => <div key={report.id} className="p-4 border border-gray-100 rounded-xl"><p className="text-sm font-bold">{report.title || report.report_type}</p><p className="text-xs text-slate-500">{report.file_name} · {String(report.report_date || '').slice(0,10)}</p><p className="text-xs text-slate-600 mt-1">{report.description}</p></div>)}
         </Card>
       )}
 
@@ -1988,6 +1847,8 @@ function PatientDetail({ patient, clinicId, onBack }: { patient: any; clinicId: 
         onSuccess={fetchHistory}
       />
 
+      <UploadMedicalReportModal open={showReportModal} onClose={() => setShowReportModal(false)} clinicId={clinicId} patientId={patient.id} onSuccess={fetchHistory} />
+
       <BookAppointmentModal
         open={showBookModal}
         onClose={() => setShowBookModal(false)}
@@ -2011,17 +1872,19 @@ function PatientsView({ selectedClinic }: { selectedClinic?: any }) {
   const [showAddPatientModal, setShowAddPatientModal] = useState(false);
   const [patients, setPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchPatients = useCallback(async () => {
     if (selectedClinic?.id) {
       setLoading(true);
+      setError("");
       try {
         const res = await patientsApi.getByClinic(selectedClinic.id, { search, limit: 100 });
         setPatients(res.data?.patients || []);
-      } catch {} finally {
+      } catch (requestError) { setPatients([]); setError(getApiErrorMessage(requestError, "Unable to load patients.")); } finally {
         setLoading(false);
       }
-    }
+    } else { setPatients([]); setLoading(false); }
   }, [selectedClinic, search]);
 
   useEffect(() => {
@@ -2051,14 +1914,16 @@ function PatientsView({ selectedClinic }: { selectedClinic?: any }) {
           />
         </div>
         <div className="ml-auto">
-          <Btn variant="primary" onClick={() => setShowAddPatientModal(true)}>
+          <Btn variant="primary" disabled={!selectedClinic?.id} onClick={() => setShowAddPatientModal(true)}>
             <Plus size={14} /> Add Patient
           </Btn>
         </div>
       </div>
 
-      <Card>
-        <table className="w-full">
+      {!selectedClinic?.id && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Select an active clinic before creating or viewing patients.</div>}
+      {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>}
+      <Card className="overflow-x-auto">
+        <table className="w-full min-w-[760px]">
           <thead>
             <tr className="border-b border-gray-50">
               {["Patient", "Contact", "Gender / Blood", "Conditions", "Registered", ""].map(h => (
@@ -2067,7 +1932,7 @@ function PatientsView({ selectedClinic }: { selectedClinic?: any }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            {patients.length === 0 ? (
+            {loading ? <tr><td colSpan={6} className="text-center py-10 text-sm text-slate-400">Loading patients...</td></tr> : patients.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-10 text-sm text-slate-400">
                   No patients registered yet. Click &quot;Add Patient&quot; to register walk-in patients.
@@ -2132,7 +1997,7 @@ function EMRView({ selectedClinic }: { selectedClinic?: any }) {
       try {
         const res = await medicalRecordsApi.getByClinic(selectedClinic.id);
         setRecords(res.data?.records || []);
-      } catch {} finally {
+      } catch (requestError) { setRecords([]); alert(getApiErrorMessage(requestError, "Unable to load medical records.")); } finally {
         setLoading(false);
       }
     }
@@ -2249,17 +2114,20 @@ function EMRView({ selectedClinic }: { selectedClinic?: any }) {
 function PrescriptionsView({ selectedClinic }: { selectedClinic?: any }) {
   const [showRxModal, setShowRxModal] = useState(false);
   const [viewRx, setViewRx] = useState<any>(null);
+  const [editRx, setEditRx] = useState<any>(null);
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchPrescriptions = useCallback(async () => {
     if (selectedClinic?.id) {
       setLoading(true);
+      setError("");
       try {
         const res = await prescriptionsApi.getByClinic(selectedClinic.id);
         setPrescriptions(res.data?.prescriptions || []);
-      } catch {} finally {
+      } catch (requestError) { setPrescriptions([]); setError(getApiErrorMessage(requestError, "Unable to load prescriptions.")); } finally {
         setLoading(false);
       }
     }
@@ -2273,6 +2141,16 @@ function PrescriptionsView({ selectedClinic }: { selectedClinic?: any }) {
       setViewRx(res.data?.prescription || rx);
     } catch {
       setViewRx(rx);
+    }
+  };
+
+  const handleEditRx = async (rx: any) => {
+    setError("");
+    try {
+      const res = await prescriptionsApi.getById(selectedClinic.id, rx.id);
+      setEditRx(res.data?.prescription || rx);
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError, "Unable to load this prescription for editing."));
     }
   };
 
@@ -2293,8 +2171,9 @@ function PrescriptionsView({ selectedClinic }: { selectedClinic?: any }) {
             className="pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64 bg-white"
           />
         </div>
-        <Btn variant="primary" onClick={() => setShowRxModal(true)}><Plus size={14} /> New Prescription</Btn>
+        <Btn variant="primary" disabled={!selectedClinic?.id} onClick={() => { setEditRx(null); setShowRxModal(true); }}><Plus size={14} /> New Prescription</Btn>
       </div>
+      {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
       <Card>
         <div className="divide-y divide-gray-50">
           {filtered.length === 0 ? (
@@ -2310,8 +2189,14 @@ function PrescriptionsView({ selectedClinic }: { selectedClinic?: any }) {
                       <span className="text-sm font-semibold text-slate-900">{rx.patient_first_name} {rx.patient_last_name}</span>
                       <span className="px-2 py-0.5 bg-green-50 text-green-700 rounded text-[11px] font-semibold">Active Rx</span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">{rx.diagnosis} · {rx.items_count || 1} medications · {new Date(rx.created_at).toLocaleDateString()}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{rx.diagnosis} · {rx.items_count || 0} medications · {new Date(rx.created_at).toLocaleDateString()}</p>
                   </div>
+                  <button
+                    onClick={() => handleEditRx(rx)}
+                    className="px-3 py-1.5 text-xs font-semibold border border-gray-200 text-slate-700 hover:bg-slate-50 rounded-lg flex items-center gap-1.5 transition-colors"
+                  >
+                    <Edit size={13} /> Edit
+                  </button>
                   <button
                     onClick={() => handleOpenRx(rx)}
                     className="px-3 py-1.5 text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg flex items-center gap-1.5 transition-colors"
@@ -2326,9 +2211,10 @@ function PrescriptionsView({ selectedClinic }: { selectedClinic?: any }) {
       </Card>
 
       <CreatePrescriptionModal
-        open={showRxModal}
-        onClose={() => setShowRxModal(false)}
+        open={showRxModal || !!editRx}
+        onClose={() => { setShowRxModal(false); setEditRx(null); }}
         clinicId={selectedClinic?.id || "0"}
+        prescription={editRx}
         onSuccess={fetchPrescriptions}
       />
 
@@ -2358,7 +2244,7 @@ function BillingView({ selectedClinic }: { selectedClinic?: any }) {
         if (res.data?.summary) {
           setSummary(res.data.summary);
         }
-      } catch {} finally {
+      } catch (requestError) { setInvoices([]); alert(getApiErrorMessage(requestError, "Unable to load billing data.")); } finally {
         setLoading(false);
       }
     }
@@ -2476,13 +2362,16 @@ function ClinicMgmtView({ selectedClinic }: { selectedClinic?: any }) {
   const fetchClinicDetails = useCallback(async () => {
     if (clinicId && clinicId !== "0") {
       try {
-        const res = await clinicsApi.getById(clinicId);
+        const [res, staffRes] = await Promise.all([
+          clinicsApi.getById(clinicId),
+          clinicsApi.getStaff(clinicId),
+        ]);
         setClinicData(res.data?.clinic || {});
-        setStaff(res.data?.staff || []);
+        setStaff(staffRes.data?.staff || []);
         if (res.data?.schedules) {
           setSchedules(res.data.schedules);
         }
-      } catch {}
+      } catch (requestError) { alert(getApiErrorMessage(requestError, "Unable to load clinic settings.")); }
     }
   }, [clinicId]);
 
@@ -2497,7 +2386,7 @@ function ClinicMgmtView({ selectedClinic }: { selectedClinic?: any }) {
       await clinicsApi.update(clinicId, clinicData);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
-    } catch {} finally {
+    } catch (requestError) { alert(getApiErrorMessage(requestError, "Unable to save clinic settings.")); } finally {
       setSaving(false);
     }
   };
@@ -2508,7 +2397,22 @@ function ClinicMgmtView({ selectedClinic }: { selectedClinic?: any }) {
       await clinicsApi.updateSchedules(clinicId, schedules);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
-    } catch {} finally {
+    } catch (requestError) { alert(getApiErrorMessage(requestError, "Unable to save operating hours.")); } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveBranding = async () => {
+    setSaving(true);
+    try {
+      const response = await clinicsApi.updateBranding(clinicId, {
+        logo_url: clinicData?.logo_url || null,
+        banner_url: clinicData?.banner_url || null,
+      });
+      setClinicData(response.data?.clinic || clinicData);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } finally {
       setSaving(false);
     }
   };
@@ -2518,7 +2422,7 @@ function ClinicMgmtView({ selectedClinic }: { selectedClinic?: any }) {
       try {
         await clinicsApi.removeStaff(clinicId, userId);
         fetchClinicDetails();
-      } catch {}
+      } catch (requestError) { alert(getApiErrorMessage(requestError, "Unable to remove this staff member.")); }
     }
   };
 
@@ -2554,21 +2458,20 @@ function ClinicMgmtView({ selectedClinic }: { selectedClinic?: any }) {
                   className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Specialization</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">City</label>
                   <input
-                    value={clinicData.specialization || ""}
-                    onChange={e => setClinicData({ ...clinicData, specialization: e.target.value })}
+                    value={clinicData.city || ""}
+                    onChange={e => setClinicData({ ...clinicData, city: e.target.value })}
                     className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Consultation Fee ($)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Timezone</label>
                   <input
-                    type="number"
-                    value={clinicData.consultation_fee || 50}
-                    onChange={e => setClinicData({ ...clinicData, consultation_fee: parseFloat(e.target.value) || 0 })}
+                    value={clinicData.timezone || "UTC"}
+                    onChange={e => setClinicData({ ...clinicData, timezone: e.target.value })}
                     className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -2745,7 +2648,36 @@ function ClinicMgmtView({ selectedClinic }: { selectedClinic?: any }) {
         <ClinicSubscriptionTab clinicId={clinicId} />
       )}
 
-      {(tab === "branding" || tab === "policies") && (
+      {tab === "branding" && clinicData && (
+        <div className="max-w-2xl space-y-5">
+          <Card className="p-6 space-y-5">
+            <div>
+              <h3 className="font-semibold text-slate-900">Clinic Branding</h3>
+              <p className="text-xs text-slate-500 mt-1">Use HTTPS image links or simulated:// references. Binary storage is not enabled.</p>
+            </div>
+            {[{ key: "logo_url", label: "Logo", ratio: "h-28" }, { key: "banner_url", label: "Banner", ratio: "h-44" }].map(item => (
+              <div key={item.key} className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-600">{item.label} reference</label>
+                <div className="flex gap-2">
+                  <input
+                    value={clinicData[item.key] || ""}
+                    onChange={e => setClinicData({ ...clinicData, [item.key]: e.target.value })}
+                    placeholder={`https://example.com/${item.label.toLowerCase()}.png`}
+                    className="flex-1 px-3 py-2.5 border border-gray-200 rounded-xl text-sm"
+                  />
+                  <button type="button" onClick={() => setClinicData({ ...clinicData, [item.key]: "" })} className="px-3 text-xs font-semibold text-rose-600 border border-rose-200 rounded-xl">Remove</button>
+                </div>
+                <div className={`${item.ratio} rounded-xl bg-slate-50 border border-dashed border-slate-200 flex items-center justify-center overflow-hidden`}>
+                  {clinicData[item.key]?.startsWith('https://') ? <img src={clinicData[item.key]} alt={`${item.label} preview`} className="max-h-full max-w-full object-contain" /> : <span className="text-xs text-slate-400">{clinicData[item.key] ? "Simulated reference saved" : `No ${item.label.toLowerCase()} selected`}</span>}
+                </div>
+              </div>
+            ))}
+            <div className="flex justify-end"><Btn onClick={handleSaveBranding}>{saving ? "Saving..." : "Save Branding"}</Btn></div>
+          </Card>
+        </div>
+      )}
+
+      {tab === "policies" && (
         <div className="max-w-xl">
           <Card className="p-6">
             <h3 className="font-semibold text-slate-900 mb-4 capitalize">{tab} Settings</h3>
@@ -2772,7 +2704,7 @@ function ServicesView({ selectedClinic }: { selectedClinic?: any }) {
       try {
         const res = await clinicsApi.getServices(clinicId);
         setServices(res.data?.services || []);
-      } catch {} finally {
+      } catch (requestError) { setServices([]); alert(getApiErrorMessage(requestError, "Unable to load services.")); } finally {
         setLoading(false);
       }
     }
@@ -2785,7 +2717,7 @@ function ServicesView({ selectedClinic }: { selectedClinic?: any }) {
       try {
         await clinicsApi.deleteService(clinicId, serviceId);
         fetchServices();
-      } catch {}
+      } catch (requestError) { alert(getApiErrorMessage(requestError, "Unable to delete this service.")); }
     }
   };
 
@@ -2881,7 +2813,7 @@ function PackagesView({ selectedClinic }: { selectedClinic?: any }) {
       try {
         const res = await clinicsApi.getPackages(clinicId);
         setPackages(res.data?.packages || []);
-      } catch {} finally {
+      } catch (requestError) { setPackages([]); alert(getApiErrorMessage(requestError, "Unable to load packages.")); } finally {
         setLoading(false);
       }
     }
@@ -2894,7 +2826,7 @@ function PackagesView({ selectedClinic }: { selectedClinic?: any }) {
       try {
         await clinicsApi.deletePackage(clinicId, pkgId);
         fetchPackages();
-      } catch {}
+      } catch (requestError) { alert(getApiErrorMessage(requestError, "Unable to delete this package.")); }
     }
   };
 
@@ -2944,6 +2876,36 @@ function PackagesView({ selectedClinic }: { selectedClinic?: any }) {
         clinicId={clinicId}
         onSuccess={fetchPackages}
       />
+    </div>
+  );
+}
+
+function DoctorReviewsView() {
+  const [data, setData] = useState<any>({ reviews: [], summary: { total: 0, average: 0, distribution: {} } });
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const doctorId = getStoredUser()?.id;
+    if (!doctorId) return;
+    doctorsApi.getReviews(doctorId, { limit: 50 })
+      .then(result => setData(result))
+      .finally(() => setLoading(false));
+  }, []);
+  if (loading) return <div className="p-8 text-sm text-slate-400">Loading reviews...</div>;
+  return (
+    <div className="p-8 space-y-6">
+      <div><h2 className="text-xl font-bold text-slate-900">Patient Reviews</h2><p className="text-xs text-slate-500">Approved feedback from completed consultations</p></div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Card className="p-5"><p className="text-xs text-slate-500">Average rating</p><p className="text-3xl font-bold text-slate-900 mt-1">{Number(data.summary?.average || 0).toFixed(1)} <Star size={20} className="inline fill-amber-400 text-amber-400" /></p></Card>
+        <Card className="p-5"><p className="text-xs text-slate-500">Total reviews</p><p className="text-3xl font-bold text-slate-900 mt-1">{data.summary?.total || 0}</p></Card>
+      </div>
+      <Card className="p-5">
+        <h3 className="font-bold text-sm mb-4">Rating distribution</h3>
+        {[5,4,3,2,1].map(rating => <div key={rating} className="flex items-center gap-3 py-1 text-xs"><span className="w-10">{rating} star</span><div className="h-2 bg-slate-100 rounded flex-1"><div className="h-2 bg-amber-400 rounded" style={{width: `${data.summary?.total ? ((data.summary.distribution?.[rating] || 0) / data.summary.total) * 100 : 0}%`}} /></div><span className="w-6 text-right">{data.summary?.distribution?.[rating] || 0}</span></div>)}
+      </Card>
+      <div className="space-y-3">
+        {(data.reviews || []).map((review: any) => <Card key={review.id} className="p-5"><div className="flex justify-between"><p className="font-semibold text-sm">{review.reviewer_name || 'Verified patient'}</p><span className="text-amber-600 text-xs font-bold">{review.rating}/5</span></div><p className="text-sm text-slate-600 mt-2">{review.comment || 'No written feedback.'}</p><p className="text-[11px] text-slate-400 mt-2">{new Date(review.created_at).toLocaleDateString()}</p></Card>)}
+        {!data.reviews?.length && <p className="text-sm text-slate-400">No approved reviews yet.</p>}
+      </div>
     </div>
   );
 }
@@ -3060,7 +3022,7 @@ function NotificationsView({ selectedClinic }: { selectedClinic?: any }) {
     try {
       const res = await authApi.getNotifications(1);
       setNotifs(res.data?.notifications || []);
-    } catch {} finally {
+    } catch (requestError) { setNotifs([]); alert(getApiErrorMessage(requestError, "Unable to load notifications.")); } finally {
       setLoading(false);
     }
   }, []);
@@ -3075,14 +3037,14 @@ function NotificationsView({ selectedClinic }: { selectedClinic?: any }) {
     try {
       await authApi.markAllNotificationsRead();
       setNotifs(ns => ns.map(x => ({ ...x, is_read: 1, read: true })));
-    } catch {}
+    } catch { alert("Unable to mark notifications as read."); }
   };
 
   const markSingle = async (id: string) => {
     try {
       await authApi.markNotificationRead(id);
       setNotifs(ns => ns.map(x => x.id === id ? { ...x, is_read: 1, read: true } : x));
-    } catch {}
+    } catch { alert("Unable to mark this notification as read."); }
   };
 
   return (
@@ -3148,7 +3110,7 @@ function SettingsView({ selectedClinic }: { selectedClinic?: any }) {
       });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
-    } catch {} finally {
+    } catch (requestError) { alert(getApiErrorMessage(requestError, "Unable to save your profile.")); } finally {
       setSaving(false);
     }
   };
@@ -3301,16 +3263,18 @@ function DashboardLayout({ section, setSection, onLogout, user, clinics, selecte
   const [cmdOpen, setCmdOpen] = useState(false);
   const [showCreateClinic, setShowCreateClinic] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", email: "", address: "", city: "", state: "", country: "", description: "" });
+  const [createError, setCreateError] = useState("");
+  const [form, setForm] = useState({ name: "", phone: "", email: "", address: "", city: "", state: "", country: "", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", description: "" });
 
   const handleCreate = async () => {
     if (!form.name.trim()) return;
     setCreating(true);
+    setCreateError("");
     try {
       await onCreateClinic?.(form);
       setShowCreateClinic(false);
-      setForm({ name: "", phone: "", email: "", address: "", city: "", state: "", country: "", description: "" });
-    } catch { /* toast would go here */ }
+      setForm({ name: "", phone: "", email: "", address: "", city: "", state: "", country: "", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", description: "" });
+    } catch (error) { setCreateError(getApiErrorMessage(error, "Unable to create this clinic.")); }
     setCreating(false);
   };
 
@@ -3333,6 +3297,7 @@ function DashboardLayout({ section, setSection, onLogout, user, clinics, selecte
       case "services":      return <ServicesView selectedClinic={selectedClinic} />;
       case "packages":      return <PackagesView selectedClinic={selectedClinic} />;
       case "analytics":     return <AnalyticsView selectedClinic={selectedClinic} />;
+      case "reviews":       return <DoctorReviewsView />;
       case "notifications": return <NotificationsView selectedClinic={selectedClinic} />;
       case "settings":      return <SettingsView selectedClinic={selectedClinic} />;
       default:              return <OverviewView setSection={setSection} selectedClinic={selectedClinic} />;
@@ -3343,7 +3308,7 @@ function DashboardLayout({ section, setSection, onLogout, user, clinics, selecte
       <Sidebar section={section} setSection={setSection} onLogout={onLogout} user={user} clinics={clinics} selectedClinic={selectedClinic} onSwitchClinic={onSwitchClinic} onOpenCreateClinic={() => setShowCreateClinic(true)} />
       <div className="flex-1 flex flex-col overflow-hidden">
         <TopBar section={section} setSection={setSection} cmdOpen={cmdOpen} setCmdOpen={setCmdOpen} user={user} />
-        <main className="flex-1 overflow-y-auto">{renderView()}</main>
+        <main key={selectedClinic?.id || "no-active-clinic"} className="flex-1 overflow-y-auto">{renderView()}</main>
       </div>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} setSection={setSection} />
 
@@ -3355,6 +3320,7 @@ function DashboardLayout({ section, setSection, onLogout, user, clinics, selecte
               <button onClick={() => setShowCreateClinic(false)} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={18} /></button>
             </div>
             <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
+              {createError && <div role="alert" className="rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-700">{createError}</div>}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Clinic Name <span className="text-red-400">*</span></label>
                 <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Smith Family Clinic" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -3386,6 +3352,11 @@ function DashboardLayout({ section, setSection, onLogout, user, clinics, selecte
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Country</label>
                   <input value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value }))} placeholder="Country" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Clinic Timezone</label>
+                <input value={form.timezone} onChange={e => setForm(f => ({ ...f, timezone: e.target.value }))} placeholder="Asia/Dhaka" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <p className="text-[11px] text-slate-400 mt-1">Use an IANA timezone such as Asia/Dhaka or America/New_York.</p>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Description</label>
@@ -3426,18 +3397,22 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
   const [appointments, setAppointments] = useState<any[]>([]);
   const [apptFilter, setApptFilter] = useState("all");
   const [medicalRecords, setMedicalRecords] = useState<any[]>([]);
+  const [medicalReports, setMedicalReports] = useState<any[]>([]);
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [payFilter, setPayFilter] = useState("all");
   const [messages, setMessages] = useState<any[]>([]);
   const [clinics, setClinics] = useState<any[]>([]);
+  const [doctors, setDoctors] = useState<any[]>([]);
   const [discoverySearch, setDiscoverySearch] = useState("");
-  const [discoveryCity, setDiscoveryCity] = useState("All");
+  const [discoveryCity, setDiscoveryCity] = useState("");
   const [discoverySpec, setDiscoverySpec] = useState("All");
+  const [discoveryDate, setDiscoveryDate] = useState(() => shiftDate(localDateString(), 1));
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [patientProfile, setPatientProfile] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [portalError, setPortalError] = useState("");
 
   // Profile form state
   const [editFirstName, setEditFirstName] = useState("");
@@ -3453,6 +3428,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
   const [editAddress, setEditAddress] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState("");
 
   // Modal triggers
   const [showBookModal, setShowBookModal] = useState(false);
@@ -3464,6 +3440,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
   const [selectedCancelAppt, setSelectedCancelAppt] = useState<any>(null);
   const [showViewRxModal, setShowViewRxModal] = useState(false);
   const [selectedPrescription, setSelectedPrescription] = useState<any>(null);
+  const [downloadingPrescriptionId, setDownloadingPrescriptionId] = useState<string>("");
   const [showViewRecordModal, setShowViewRecordModal] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
   const [showPayModal, setShowPayModal] = useState(false);
@@ -3489,15 +3466,16 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
 
   const loadAllData = useCallback(async () => {
     try {
-      const [profRes, apptRes, recordsRes, rxRes, payRes, notifRes, userRes, msgRes] = await Promise.all([
-        authApi.getPatientProfile().catch(() => null),
-        authApi.getMyAppointments().catch(() => null),
-        authApi.getMedicalRecords().catch(() => null),
-        authApi.getPrescriptions().catch(() => null),
-        authApi.getMyPayments().catch(() => null),
-        authApi.getNotifications(1).catch(() => null),
-        authApi.getProfile().catch(() => null),
-        messagesApi.getMyMessages().catch(() => null),
+      const [profRes, apptRes, recordsRes, reportsRes, rxRes, payRes, notifRes, userRes, msgRes] = await Promise.all([
+        authApi.getPatientProfile(),
+        authApi.getMyAppointments(),
+        authApi.getMedicalRecords(),
+        authApi.getMedicalReports(),
+        authApi.getPrescriptions(),
+        authApi.getMyPayments(),
+        authApi.getNotifications(1),
+        authApi.getProfile(),
+        messagesApi.getMyMessages(),
       ]);
 
       if (profRes?.data?.patient) {
@@ -3523,28 +3501,45 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
 
       if (apptRes?.data?.appointments) setAppointments(apptRes.data.appointments);
       if (recordsRes?.data?.records) setMedicalRecords(recordsRes.data.records);
+      if (reportsRes?.data?.reports) setMedicalReports(reportsRes.data.reports);
       if (rxRes?.data?.prescriptions) setPrescriptions(rxRes.data.prescriptions);
       if (payRes?.data?.payments) setPayments(payRes.data.payments);
       if (notifRes?.data?.notifications) setPatientNotifs(notifRes.data.notifications);
       if (userRes?.data?.user) setUserProfile(userRes.data.user);
       if (msgRes?.data?.messages) setMessages(msgRes.data.messages);
-    } catch {}
+    } catch (requestError) {
+      setPortalError(getApiErrorMessage(requestError, "Unable to load your patient portal data."));
+    }
     setLoading(false);
   }, []);
 
   const searchClinics = useCallback(async () => {
     setDiscoveryLoading(true);
     try {
-      const res = await clinicsApi.search({
-        query: discoverySearch || undefined,
-        city: discoveryCity !== "All" ? discoveryCity : undefined,
-        specialization: discoverySpec !== "All" ? discoverySpec : undefined,
-        limit: 50,
-      });
+      const [res, doctorResult] = await Promise.all([
+        clinicsApi.search({
+          query: discoverySearch || undefined,
+          city: discoveryCity || undefined,
+          specialization: discoverySpec !== "All" ? discoverySpec : undefined,
+          limit: 50,
+        }),
+        doctorsApi.search({
+          query: discoverySearch || undefined,
+          city: discoveryCity || undefined,
+          specialty: discoverySpec !== "All" ? discoverySpec : undefined,
+          availability_date: discoveryDate,
+          limit: 50,
+        }),
+      ]);
       if (res?.data?.clinics) setClinics(res.data.clinics);
-    } catch {}
+      setDoctors(doctorResult?.doctors || []);
+    } catch (requestError) {
+      setClinics([]);
+      setDoctors([]);
+      setPortalError(getApiErrorMessage(requestError, "Unable to search clinics and doctors."));
+    }
     setDiscoveryLoading(false);
-  }, [discoverySearch, discoveryCity, discoverySpec]);
+  }, [discoverySearch, discoveryCity, discoverySpec, discoveryDate]);
 
   useEffect(() => {
     loadAllData();
@@ -3562,6 +3557,14 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
   const handleSaveProfile = async () => {
     setProfileSaving(true);
     setProfileSaved(false);
+    setProfileError("");
+    const today = new Date();
+    const todayText = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    if (editDob && editDob > todayText) {
+      setProfileError("Date of birth cannot be in the future.");
+      setProfileSaving(false);
+      return;
+    }
     try {
       await authApi.updateProfile({
         first_name: editFirstName,
@@ -3579,8 +3582,22 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
       setProfileSaved(true);
       setTimeout(() => setProfileSaved(false), 3000);
       loadAllData();
-    } catch {}
+    } catch (error) { setProfileError(getApiErrorMessage(error, "Unable to save your profile.")); }
     setProfileSaving(false);
+  };
+
+  const downloadPrescription = async (prescription: any) => {
+    setDownloadingPrescriptionId(prescription.id);
+    try {
+      const response = await prescriptionsApi.downloadPdf(prescription.clinic_id, prescription.id);
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `prescription-${prescription.id}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) { setPortalError(getApiErrorMessage(error, "Unable to generate the prescription PDF.")); }
+    finally { setDownloadingPrescriptionId(""); }
   };
 
   // Compute live metrics
@@ -3617,6 +3634,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans relative">
+      {portalError && <div role="alert" className="fixed top-4 right-4 z-[120] max-w-sm rounded-xl border border-rose-200 bg-white px-4 py-3 text-sm text-rose-700 shadow-lg"><button className="float-right ml-3" onClick={() => setPortalError("")} aria-label="Dismiss error"><X size={14} /></button>{portalError}</div>}
       {/* Mobile Backdrop */}
       {sidebarOpen && (
         <div
@@ -3914,7 +3932,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                           </div>
                           <div>
                             <p className="text-xs font-bold text-slate-900">{m.medication_name || m.medicine_name}</p>
-                            <p className="text-[11px] text-slate-500">{m.dosage || 'Standard'} · {m.frequency || 'Daily'} · {m.duration || 'Prescribed duration'}</p>
+                            <p className="text-[11px] text-slate-500">{m.dosage || 'Dosage not recorded'} · {m.frequency || 'Frequency not recorded'} · {m.duration || 'Duration not recorded'}</p>
                             {m.instructions && <p className="text-[10px] text-slate-400 italic">"{m.instructions}"</p>}
                           </div>
                         </div>
@@ -3984,17 +4002,22 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                       className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                     />
                   </div>
-                  <select
+                  <input
+                    type="search"
                     value={discoveryCity}
                     onChange={e => setDiscoveryCity(e.target.value)}
+                    placeholder="City or location"
+                    aria-label="Clinic city"
                     className="px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                  >
-                    <option value="All">All Locations / Cities</option>
-                    <option value="Dhaka">Dhaka</option>
-                    <option value="New York">New York</option>
-                    <option value="London">London</option>
-                    <option value="San Francisco">San Francisco</option>
-                  </select>
+                  />
+                  <input
+                    type="date"
+                    min={localDateString()}
+                    value={discoveryDate}
+                    onChange={e => setDiscoveryDate(e.target.value)}
+                    aria-label="Doctor availability date"
+                    className="px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm bg-white"
+                  />
                   <button
                     onClick={searchClinics}
                     className="px-5 py-2.5 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-colors"
@@ -4021,6 +4044,41 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                 </div>
               </div>
 
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold text-slate-900">Available doctors</h3>
+                  <span className="text-xs text-slate-400">{discoveryDate}</span>
+                </div>
+                {doctors.length === 0 ? (
+                  <div className="p-5 bg-white border border-gray-100 rounded-2xl text-xs text-slate-500">No doctors have an open slot for these filters.</div>
+                ) : (
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {doctors.map((doctor: any) => (
+                      <Card key={doctor.doctor_id} className="p-5">
+                        <div className="flex justify-between gap-3">
+                          <div>
+                            <p className="font-bold text-slate-900">Dr. {doctor.first_name} {doctor.last_name}</p>
+                            <p className="text-xs text-teal-700 font-semibold">{doctor.specialization || "General Medicine"}</p>
+                            <p className="text-xs text-slate-500 mt-2">{doctor.experience_years || 0} years · ${doctor.consultation_fee || 0}</p>
+                          </div>
+                          <div className="text-xs font-bold text-amber-700"><Star size={12} className="inline fill-amber-400" /> {Number(doctor.avg_rating || 0).toFixed(1)}</div>
+                        </div>
+                        <div className="mt-4 flex justify-end">
+                          <Btn variant="teal" size="sm" onClick={() => {
+                            const clinic = doctor.available_clinic_ids?.[0];
+                            if (clinic) {
+                              setBookingClinicId(clinic);
+                              setBookingDoctorId(doctor.doctor_id);
+                              setShowBookModal(true);
+                            }
+                          }}><Calendar size={13} /> View slots & book</Btn>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Clinics Result Grid */}
               {discoveryLoading ? (
                 <div className="text-center py-12 text-slate-400 text-sm font-medium">Searching verified clinics...</div>
@@ -4040,14 +4098,14 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                             <h3 className="font-bold text-slate-900 text-base">{clinic.name}</h3>
                             <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
                               <MapPin size={12} className="text-slate-400" />
-                              {clinic.address ? `${clinic.address}, ` : ""}{clinic.city || "Clinic City"}
+                              {clinic.address ? `${clinic.address}, ` : ""}{clinic.city || "Location not provided"}
                             </p>
                           </div>
-                          <div className="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-1 rounded-lg text-xs font-bold border border-amber-100">
+                          {Number(clinic.reviews_count || 0) > 0 ? <div className="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-1 rounded-lg text-xs font-bold border border-amber-100">
                             <Star size={12} className="fill-amber-400 text-amber-400" />
-                            {parseFloat(clinic.avg_rating || 5).toFixed(1)}
-                            <span className="text-[10px] text-amber-600 font-normal">({clinic.reviews_count || 0})</span>
-                          </div>
+                            {parseFloat(clinic.avg_rating || 0).toFixed(1)}
+                            <span className="text-[10px] text-amber-600 font-normal">({clinic.reviews_count})</span>
+                          </div> : <span className="text-[10px] font-semibold text-slate-400">No reviews yet</span>}
                         </div>
 
                         {clinic.doctor_first_name && (
@@ -4059,32 +4117,19 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                         )}
 
                         <p className="text-xs text-slate-600 line-clamp-2">
-                          {clinic.description || "Fully equipped modern healthcare facility providing dedicated patient care."}
+                          {clinic.description || "No clinic description provided."}
                         </p>
                       </div>
 
                       <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between gap-3">
-                        <div className="text-xs text-slate-500">
-                          Fee: <span className="font-bold text-slate-900">${clinic.consultation_fee || 50}</span>
-                        </div>
+                        <div className="text-xs text-slate-500">Fees shown when selecting a service</div>
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => {
-                              setMessageReceiverId(clinic.owner_id);
-                              setMessageReceiverName(`Dr. ${clinic.doctor_first_name || 'Clinic'}`);
-                              setShowMessageModal(true);
-                            }}
-                            className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 transition-colors"
-                            title="Inquire / Message"
-                          >
-                            <MessageSquare size={14} />
-                          </button>
                           <Btn
                             variant="teal"
                             size="sm"
                             onClick={() => {
                               setBookingClinicId(clinic.id);
-                              setBookingDoctorId(clinic.owner_id || "");
+                              setBookingDoctorId(clinic.primary_doctor_id || "");
                               setShowBookModal(true);
                             }}
                           >
@@ -4146,7 +4191,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                           {appt.doctor_first_name ? ` with Dr. ${appt.doctor_first_name} ${appt.doctor_last_name || ""}` : ""}
                         </p>
                         <p className="text-xs text-slate-500 mt-1">
-                          📅 {appt.appointment_date} at {appt.start_time?.substring(0, 5)} · 🏥 {appt.clinic_name || "Rahman Medical Center"}
+                          📅 {appt.appointment_date} at {appt.start_time?.substring(0, 5)} · 🏥 {appt.clinic_name || "Clinic"}
                         </p>
                         {appt.notes && <p className="text-xs text-slate-400 italic mt-1">"{appt.notes}"</p>}
                         {appt.cancellation_reason && (
@@ -4242,6 +4287,16 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
             </Card>
           )}
 
+          {section === "p-records" && (
+            <Card className="mt-5">
+              <div className="p-6 border-b border-gray-50"><h3 className="font-bold text-slate-900">Medical Reports</h3><p className="text-xs text-slate-400">Lab results and report references uploaded by your clinic</p></div>
+              <div className="divide-y divide-gray-50">
+                {medicalReports.map((report: any) => <div key={report.id} className="p-5 flex items-center justify-between gap-4"><div><p className="text-sm font-bold">{report.title || report.report_type}</p><p className="text-xs text-slate-500">{report.report_type} · {report.file_name || 'Referenced document'} · {String(report.report_date || '').slice(0,10)}</p><p className="text-xs text-slate-600 mt-1">{report.description}</p></div>{report.file_url?.startsWith('https://') ? <a href={report.file_url} target="_blank" rel="noreferrer" className="text-xs font-bold text-teal-700">Open report</a> : <span className="text-xs text-slate-400">Simulated file</span>}</div>)}
+                {!medicalReports.length && <p className="p-6 text-xs text-slate-400">No medical reports uploaded.</p>}
+              </div>
+            </Card>
+          )}
+
           {/* 5. PRESCRIPTIONS */}
           {section === "p-prescriptions" && (
             <Card>
@@ -4274,12 +4329,10 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => { setSelectedPrescription(rx); setShowViewRxModal(true); }}
-                      className="px-4 py-2 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-colors flex items-center gap-1.5 self-start sm:self-center"
-                    >
-                      <Eye size={13} /> View Rx & Print
-                    </button>
+                    <div className="flex flex-wrap gap-2 self-start sm:self-center">
+                      <button onClick={() => { setSelectedPrescription(rx); setShowViewRxModal(true); }} className="px-4 py-2 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 rounded-xl transition-colors flex items-center gap-1.5"><Eye size={13} /> View</button>
+                      <button disabled={downloadingPrescriptionId === rx.id} onClick={() => downloadPrescription(rx)} className="px-4 py-2 text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 disabled:opacity-50 rounded-xl transition-colors flex items-center gap-1.5"><Download size={13} /> {downloadingPrescriptionId === rx.id ? "Generating..." : "PDF"}</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -4342,6 +4395,17 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                           ${parseFloat(inv.total_amount || inv.amount || 0).toFixed(2)}
                         </span>
                         <InvoiceBadge status={isPaid ? "Paid" : "Pending"} />
+                        {isPaid && (
+                          <Btn variant="outline" size="sm" onClick={async () => {
+                            const response = await paymentsApi.downloadReceipt(inv.clinic_id, inv.id);
+                            const url = URL.createObjectURL(response.data);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = `receipt-${inv.receipt_number || inv.id}.pdf`;
+                            link.click();
+                            URL.revokeObjectURL(url);
+                          }}><Download size={13} /> Receipt</Btn>
+                        )}
                         {!isPaid && (
                           <Btn
                             variant="teal"
@@ -4374,8 +4438,8 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                   variant="teal"
                   size="sm"
                   onClick={() => {
-                    setMessageReceiverId(patientProfile?.owner_id || patientProfile?.doctor_id || "");
-                    setMessageReceiverName("Clinic Doctor");
+                    setMessageReceiverId("");
+                    setMessageReceiverName("");
                     setShowMessageModal(true);
                   }}
                 >
@@ -4426,7 +4490,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-900">{fullName}</h3>
-                    <p className="text-xs text-slate-400">Patient Account · Member since {patientProfile?.created_at ? new Date(patientProfile.created_at).toLocaleDateString() : '2026'}</p>
+                    <p className="text-xs text-slate-400">Patient Account · {patientProfile?.created_at ? `Member since ${new Date(patientProfile.created_at).toLocaleDateString()}` : "Profile not yet linked to a clinic"}</p>
                   </div>
                 </div>
 
@@ -4435,8 +4499,9 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                     <CheckCircle2 size={16} /> Profile updated successfully!
                   </div>
                 )}
+                {profileError && <div role="alert" className="p-3.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-semibold">{profileError}</div>}
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">First Name *</label>
                     <input
@@ -4506,6 +4571,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Date of Birth</label>
                     <input
                       type="date"
+                      max={`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`}
                       value={editDob}
                       onChange={e => setEditDob(e.target.value)}
                       className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
@@ -4582,6 +4648,7 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
         onClose={() => setShowBookModal(false)}
         clinicId={bookingClinicId || patientProfile?.clinic_id || "0"}
         doctorId={bookingDoctorId}
+        appointmentDate={discoveryDate}
         patientId={patientProfile?.id}
         onSuccess={() => {
           loadAllData();
@@ -4647,6 +4714,9 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
         open={showMessageModal}
         onClose={() => setShowMessageModal(false)}
         receiverId={messageReceiverId}
+        receiverName={messageReceiverName}
+        senderId={user?.id}
+        senderName={fullName}
         onSuccess={() => {
           loadAllData();
         }}
@@ -4666,14 +4736,14 @@ function ClinicSubscriptionTab({ clinicId }: { clinicId: string }) {
   const loadSubData = useCallback(async () => {
     try {
       const [subRes, limRes, plansRes] = await Promise.all([
-        subscriptionsApi.getMySubscription(clinicId).catch(() => null),
-        subscriptionsApi.getLimits(clinicId).catch(() => null),
-        subscriptionsApi.getPlans().catch(() => null),
+        subscriptionsApi.getMySubscription(clinicId),
+        subscriptionsApi.getLimits(clinicId),
+        subscriptionsApi.getPlans(),
       ]);
       if (subRes?.data?.subscription) setSub(subRes.data.subscription);
       if (limRes?.data?.limits) setLimits(limRes.data.limits);
       if (plansRes?.data?.plans) setPlans(plansRes.data.plans);
-    } catch {}
+    } catch (requestError) { setMsg(getApiErrorMessage(requestError, "Unable to load plan and usage data.")); }
     setLoading(false);
   }, [clinicId]);
 
@@ -4703,8 +4773,19 @@ function ClinicSubscriptionTab({ clinicId }: { clinicId: string }) {
         setMsg("Subscription cancelled");
         setTimeout(() => setMsg(""), 3000);
         loadSubData();
-      } catch {}
+      } catch (requestError) { setMsg(getApiErrorMessage(requestError, "Unable to cancel the subscription.")); }
     }
+  };
+
+  const handleRenew = async () => {
+    setSubscribing(true);
+    try {
+      await subscriptionsApi.renewSubscription(clinicId);
+      setMsg("Subscription renewed; the new expiration date is active.");
+      loadSubData();
+    } catch (err: any) {
+      setMsg(err.response?.data?.message || "Unable to renew subscription");
+    } finally { setSubscribing(false); }
   };
 
   if (loading) return <div className="p-8 text-xs text-slate-400">Loading plan and usage data...</div>;
@@ -4730,6 +4811,9 @@ function ClinicSubscriptionTab({ clinicId }: { clinicId: string }) {
             </span>
             {sub && !sub.is_default && sub.status === 'active' && (
               <button onClick={handleCancel} className="text-xs text-red-600 hover:underline ml-2 font-semibold">Cancel Plan</button>
+            )}
+            {sub && !sub.is_default && (
+              <button disabled={subscribing} onClick={handleRenew} className="text-xs text-blue-600 hover:underline ml-2 font-semibold">Renew Plan</button>
             )}
           </div>
         </div>
@@ -4917,6 +5001,7 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
   // Loaders
   const loadDashboard = useCallback(async () => {
     setLoading(true);
+    setErrorMsg("");
     try {
       const res = await adminApi.getDashboard();
       if (res?.data) {
@@ -4926,12 +5011,16 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
         setPendingClinics(res.data.pending_clinics || []);
         setMonthlyTrends(res.data.monthly_trends || []);
       }
-    } catch {}
+    } catch (error) {
+      setDashboardStats(null); setPlanDistribution([]); setRecentUsers([]); setPendingClinics([]); setMonthlyTrends([]);
+      setErrorMsg(getApiErrorMessage(error, "Failed to load platform overview."));
+    }
     setLoading(false);
   }, []);
 
   const loadClinics = useCallback(async () => {
     setLoading(true);
+    setErrorMsg("");
     try {
       const res = await adminApi.getClinics({
         page: clinicPage,
@@ -4942,12 +5031,16 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
         setClinics(res.data.clinics || []);
         setClinicTotal(res.data.total || 0);
       }
-    } catch {}
+    } catch (error) {
+      setClinics([]); setClinicTotal(0);
+      setErrorMsg(getApiErrorMessage(error, "Failed to load clinics."));
+    }
     setLoading(false);
   }, [clinicPage, clinicSearch, clinicFilter]);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
+    setErrorMsg("");
     try {
       const res = await adminApi.getUsers({
         page: userPage,
@@ -4958,38 +5051,44 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
         setUsersList(res.data.users || []);
         setUserTotal(res.data.total || 0);
       }
-    } catch {}
+    } catch (error) {
+      setUsersList([]); setUserTotal(0);
+      setErrorMsg(getApiErrorMessage(error, "Failed to load users."));
+    }
     setLoading(false);
   }, [userPage, userSearch, userRoleFilter]);
 
   const loadSubscriptions = useCallback(async () => {
     setLoading(true);
+    setErrorMsg("");
     try {
       const [plansRes, subsRes] = await Promise.all([
-        adminApi.getPlans().catch(() => null),
-        adminApi.getSubscriptions().catch(() => null),
+        adminApi.getPlans(),
+        adminApi.getSubscriptions(),
       ]);
       if (plansRes?.data?.plans) setPlans(plansRes.data.plans);
       if (subsRes?.data?.subscriptions) setClinicSubs(subsRes.data.subscriptions);
-    } catch {}
+    } catch (error) { setPlans([]); setClinicSubs([]); setErrorMsg(getApiErrorMessage(error, "Failed to load subscriptions.")); }
     setLoading(false);
   }, []);
 
   const loadReviews = useCallback(async () => {
     setLoading(true);
+    setErrorMsg("");
     try {
       const res = await adminApi.getPendingReviews();
       if (res?.data?.reviews) setPendingReviews(res.data.reviews);
-    } catch {}
+    } catch (error) { setPendingReviews([]); setErrorMsg(getApiErrorMessage(error, "Failed to load reviews.")); }
     setLoading(false);
   }, []);
 
   const loadAuditLogs = useCallback(async () => {
     setLoading(true);
+    setErrorMsg("");
     try {
       const res = await adminApi.getAuditLogs({ action: auditSearch || undefined });
       if (res?.data?.logs) setAuditLogs(res.data.logs);
-    } catch {}
+    } catch (error) { setAuditLogs([]); setErrorMsg(getApiErrorMessage(error, "Failed to load audit logs.")); }
     setLoading(false);
   }, [auditSearch]);
 
@@ -5184,6 +5283,7 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
             <AlertCircle size={14} className="text-rose-600 flex-shrink-0" /> {errorMsg}
           </div>
         )}
+        {loading && <div role="status" className="mb-4 px-4 py-3 rounded-xl bg-blue-50 text-blue-700 text-xs font-semibold flex items-center gap-2"><span className="animate-spin w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full" /> Loading current database information...</div>}
 
         {/* View Content */}
         <main className="flex-1 overflow-y-auto p-8 space-y-6">
@@ -5342,8 +5442,8 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
                 </div>
               </div>
 
-              <Card className="overflow-hidden">
-                <table className="w-full text-left">
+              <Card className="overflow-x-auto">
+                <table className="w-full min-w-[940px] text-left">
                   <thead>
                     <tr className="border-b border-gray-100 bg-slate-50/50">
                       {["Clinic Name", "Doctor / Owner", "City", "Patients", "Appointments", "Plan", "Status", "Actions"].map(h => (
@@ -5386,11 +5486,12 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
                       </tr>
                     ))}
                     {clinics.length === 0 && (
-                      <tr><td colSpan={8} className="py-8 text-center text-slate-400">No clinics found matching criteria</td></tr>
+                      <tr><td colSpan={8} className="py-8 text-center text-slate-400">{loading ? "Loading clinics..." : "No clinics found."}</td></tr>
                     )}
                   </tbody>
                 </table>
               </Card>
+              {clinicTotal > 20 && <div className="flex items-center justify-between text-xs text-slate-500"><span>{clinicTotal} clinics</span><div className="flex gap-2"><button disabled={clinicPage <= 1} onClick={() => setClinicPage(page => Math.max(1, page - 1))} className="px-3 py-2 rounded-lg border bg-white disabled:opacity-40">Previous</button><button disabled={clinicPage * 20 >= clinicTotal} onClick={() => setClinicPage(page => page + 1)} className="px-3 py-2 rounded-lg border bg-white disabled:opacity-40">Next</button></div></div>}
             </div>
           )}
 
@@ -5423,8 +5524,8 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
                 </div>
               </div>
 
-              <Card className="overflow-hidden">
-                <table className="w-full text-left">
+              <Card className="overflow-x-auto">
+                <table className="w-full min-w-[900px] text-left">
                   <thead>
                     <tr className="border-b border-gray-100 bg-slate-50/50">
                       {["Full Name", "Email Address", "Role", "Verification", "Account Status", "Joined Date", "Actions"].map(h => (
@@ -5475,11 +5576,12 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
                       </tr>
                     ))}
                     {usersList.length === 0 && (
-                      <tr><td colSpan={7} className="py-8 text-center text-slate-400">No users found matching query</td></tr>
+                      <tr><td colSpan={7} className="py-8 text-center text-slate-400">{loading ? "Loading users..." : "No users found."}</td></tr>
                     )}
                   </tbody>
                 </table>
               </Card>
+              {userTotal > 20 && <div className="flex items-center justify-between text-xs text-slate-500"><span>{userTotal} users</span><div className="flex gap-2"><button disabled={userPage <= 1} onClick={() => setUserPage(page => Math.max(1, page - 1))} className="px-3 py-2 rounded-lg border bg-white disabled:opacity-40">Previous</button><button disabled={userPage * 20 >= userTotal} onClick={() => setUserPage(page => page + 1)} className="px-3 py-2 rounded-lg border bg-white disabled:opacity-40">Next</button></div></div>}
             </div>
           )}
 
@@ -5843,31 +5945,48 @@ function AdminPanel({ onBack, onLogout, user }: { onBack: () => void; onLogout: 
 // ── App Root ──────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [page, setPage] = useState<"landing" | "auth" | "onboarding" | "dashboard" | "patient-portal" | "admin" | "reset-password">("landing");
+  const [page, setPage] = useState<"landing" | "auth" | "dashboard" | "patient-portal" | "admin" | "reset-password">("landing");
   const [section, setSection] = useState("overview");
   const [user, setUser] = useState(getStoredUser());
   const [clinics, setClinics] = useState<any[]>([]);
   const [selectedClinic, setSelectedClinic] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionNotice, setSessionNotice] = useState("");
+  const [clinicError, setClinicError] = useState("");
 
   const fetchClinics = useCallback(async () => {
+    setClinicError("");
     try {
       const { data } = await clinicsApi.getMyClinics();
-      setClinics(data.clinics || data || []);
-      const storedId = localStorage.getItem("clinic_os_selected_clinic_id");
-      const found = (data.clinics || data || []).find((c: any) => c.id === storedId);
+      const accessible = data.clinics || data || [];
+      const currentUser = getStoredUser();
+      const storageKey = `clinic_os_selected_clinic_id_${currentUser?.id || "anonymous"}`;
+      const active = accessible.filter((clinic: any) => Boolean(clinic.is_active));
+      setClinics(accessible);
+      const storedId = localStorage.getItem(storageKey);
+      const found = active.find((c: any) => c.id === storedId);
       if (found) setSelectedClinic(found);
-      else if (data.clinics?.length) setSelectedClinic(data.clinics[0]);
-      else if (data.length) setSelectedClinic(data[0]);
-    } catch {
-      // Keep defaults
+      else if (active.length) {
+        setSelectedClinic(active[0]);
+        localStorage.setItem(storageKey, active[0].id);
+      } else {
+        setSelectedClinic(null);
+        localStorage.removeItem(storageKey);
+      }
+    } catch (requestError) {
+      setClinics([]);
+      setSelectedClinic(null);
+      setClinicError(getApiErrorMessage(requestError, "Unable to load your clinic workspaces."));
     }
   }, []);
 
   const handleSwitchClinic = useCallback((clinic: any) => {
-    setSelectedClinic(clinic);
-    localStorage.setItem("clinic_os_selected_clinic_id", clinic.id);
-  }, []);
+    const authorized = clinics.find((candidate: any) => candidate.id === clinic?.id && candidate.is_active);
+    if (!authorized) return;
+    setSection("overview");
+    setSelectedClinic(authorized);
+    localStorage.setItem(`clinic_os_selected_clinic_id_${user?.id || "anonymous"}`, authorized.id);
+  }, [clinics, user?.id]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -5885,17 +6004,31 @@ export default function App() {
       else setPage("dashboard");
     }
     setLoading(false);
-  }, [fetchClinics]);
+  }, [fetchClinics, user?.id]);
+
+  useEffect(() => {
+    const expire = () => {
+      Object.keys(localStorage).filter(key => key.startsWith('clinic_os_')).forEach(key => localStorage.removeItem(key));
+      setUser(null);
+      setClinics([]);
+      setSelectedClinic(null);
+      setSection('overview');
+      setSessionNotice('Your session expired. Please sign in again.');
+      setPage('auth');
+    };
+    window.addEventListener('auth:expired', expire);
+    return () => window.removeEventListener('auth:expired', expire);
+  }, []);
 
   const handleLoginSuccess = useCallback((token: string, userData: any) => {
     setAuthToken(token, userData);
     setUser(userData);
     if (userData.role === "patient") setPage("patient-portal");
     else if (userData.role === "admin") setPage("admin");
-    else if (localStorage.getItem("clinic_os_onboarding_done")) {
+    else {
       fetchClinics();
       setPage("dashboard");
-    } else setPage("onboarding");
+    }
   }, [fetchClinics]);
 
   const handleCreateClinic = useCallback(async (data: any) => {
@@ -5904,7 +6037,7 @@ export default function App() {
     const newClinic = res.data?.clinic || res.data;
     if (newClinic?.id) {
       setSelectedClinic(newClinic);
-      localStorage.setItem("clinic_os_selected_clinic_id", newClinic.id);
+      localStorage.setItem(`clinic_os_selected_clinic_id_${user?.id || "anonymous"}`, newClinic.id);
     }
     return res;
   }, [fetchClinics]);
@@ -5914,22 +6047,22 @@ export default function App() {
     setUser(null);
     setClinics([]);
     setSelectedClinic(null);
+    Object.keys(localStorage).filter(key => key.startsWith("clinic_os_selected_clinic_id_")).forEach(key => localStorage.removeItem(key));
     setPage("landing");
   }, []);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full" /></div>;
-  if (page === "auth")           return <AuthPage onSuccess={handleLoginSuccess} onBack={() => setPage("landing")} />;
-  if (page === "onboarding")     return <OnboardingPage onFinish={() => { localStorage.setItem("clinic_os_onboarding_done", "true"); fetchClinics(); setPage("dashboard"); }} />;
-  if (page === "dashboard")      return <DashboardLayout section={section} setSection={setSection} onLogout={handleLogout} user={user} clinics={clinics} selectedClinic={selectedClinic} onSwitchClinic={handleSwitchClinic} onCreateClinic={handleCreateClinic} />;
+  if (page === "auth")           return <AuthPage notice={sessionNotice} onSuccess={(token, data) => { setSessionNotice(''); handleLoginSuccess(token, data); }} onBack={() => setPage("landing")} />;
+  if (page === "dashboard")      return <><DashboardLayout section={section} setSection={setSection} onLogout={handleLogout} user={user} clinics={clinics} selectedClinic={selectedClinic} onSwitchClinic={handleSwitchClinic} onCreateClinic={handleCreateClinic} />{clinicError && <div role="alert" className="fixed bottom-5 right-5 z-[150] max-w-sm rounded-xl border border-rose-200 bg-white p-4 text-sm text-rose-700 shadow-xl">{clinicError}<button type="button" onClick={fetchClinics} className="ml-3 font-semibold text-blue-700">Retry</button></div>}</>;
   if (page === "patient-portal") return <PatientPortal onBack={() => setPage("landing")} onLogout={handleLogout} />;
-  if (page === "admin")          return <AdminPanel onBack={() => setPage("landing")} onLogout={handleLogout} user={user} />;
+  if (page === "admin" && user?.role === "admin") return <AdminPanel onBack={() => setPage("landing")} onLogout={handleLogout} user={user} />;
   if (page === "reset-password") return <ResetPasswordPage onBackToLogin={() => setPage("auth")} />;
   return (
     <LandingPage
       onLogin={() => setPage("auth")}
       onStart={() => setPage("auth")}
-      onPatientPortal={() => setPage("patient-portal")}
-      onAdmin={() => setPage("admin")}
+      onPatientPortal={() => setPage("auth")}
+      onAdmin={() => setPage("auth")}
     />
   );
 }

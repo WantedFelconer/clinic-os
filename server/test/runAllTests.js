@@ -15,16 +15,22 @@ async function main() {
   console.log('   ClinicOS Automated Verification Test Runner');
   console.log('═══════════════════════════════════════════════════════════');
 
-  for (const suite of suites) {
-    console.log(`\n>>> Executing ${suite.name}...`);
-    execSync(`node ${suite.file}`, {
-      cwd: path.resolve(__dirname, '..'),
-      stdio: 'inherit',
-    });
+  execSync('node --test test/security_remediation.test.js', { cwd: path.resolve(__dirname, '..'), stdio: 'inherit' });
+
+  if (process.env.RUN_INTEGRATION_TESTS === 'true') {
+    const testDbName = process.env.TEST_DB_NAME || '';
+    if (!/(test|ci)/i.test(testDbName)) throw new Error('TEST_DB_NAME must clearly identify a dedicated test/CI database.');
+    const childEnv = { ...process.env, NODE_ENV: 'test', DB_NAME: testDbName };
+    for (const suite of suites) {
+      console.log(`\n>>> Executing ${suite.name}...`);
+      execSync(`node ${suite.file}`, { cwd: path.resolve(__dirname, '..'), stdio: 'inherit', env: childEnv });
+    }
+  } else {
+    console.log('\nDatabase integration suites skipped safely. Set RUN_INTEGRATION_TESTS=true and TEST_DB_NAME to a dedicated test database to enable them.');
   }
 
   console.log('\n═══════════════════════════════════════════════════════════');
-  console.log('  🎉 ALL SPRINT TEST SUITES EXECUTED & PASSED 100%');
+  console.log('  Automated test command completed successfully.');
   console.log('═══════════════════════════════════════════════════════════\n');
 }
 

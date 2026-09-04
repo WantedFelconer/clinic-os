@@ -6,6 +6,8 @@ export const clinicsApi = {
   getMyClinics: () => apiClient.get('/clinics'),
   create: (data) => apiClient.post('/clinics', data),
   update: (id, data) => apiClient.put(`/clinics/${id}`, data),
+  updateBranding: (id, data: { logo_url?: string | null; banner_url?: string | null }) =>
+    apiClient.patch(`/clinics/${id}/branding`, data),
   getDashboard: (clinicId) => apiClient.get(`/clinics/${clinicId}/dashboard`),
   getAnalytics: (clinicId) => apiClient.get(`/clinics/${clinicId}/analytics`),
   getSchedules: (clinicId) => apiClient.get(`/clinics/${clinicId}/schedules`),

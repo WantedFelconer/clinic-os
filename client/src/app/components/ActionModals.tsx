@@ -3,36 +3,48 @@ import {
   X, Check, Plus, Trash2, Star, CreditCard, Send, Calendar,
   FileText, Pill, Package, Building2, User, Clock, AlertCircle,
   Printer, DollarSign, UserPlus, Phone, Mail, MapPin, Edit,
-  Shield, CheckCircle2, RefreshCw
+  Shield, CheckCircle2, RefreshCw, Download
 } from "lucide-react";
 import {
   appointmentsApi, medicalRecordsApi, prescriptionsApi,
   clinicsApi, paymentsApi, patientsApi, reviewsApi, messagesApi,
+  medicalReportsApi, getStoredUser,
 } from "../api";
+
+const localDate = (offsetDays = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
 
 // ── 1. Book Appointment Modal ──────────────────────────────────────────────────
 export function BookAppointmentModal({
-  open, onClose, clinicId, patientId, doctorId, onSuccess,
+  open, onClose, clinicId, patientId, doctorId, appointmentDate, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   clinicId: string;
   patientId?: string;
   doctorId?: string;
+  appointmentDate?: string;
   onSuccess: () => void;
 }) {
   const [form, setForm] = useState({
     patient_id: patientId || "",
     doctor_id: doctorId || "",
     service_id: "",
-    appointment_date: new Date(Date.now() + 86400000).toISOString().split("T")[0],
-    start_time: "10:00",
-    end_time: "10:30",
+    appointment_date: localDate(1),
+    start_time: "",
+    end_time: "",
     type: "in-person",
     notes: "",
   });
   const [services, setServices] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
+  const [doctors, setDoctors] = useState<any[]>([]);
+  const [slots, setSlots] = useState<any[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -43,59 +55,81 @@ export function BookAppointmentModal({
   }, [patientId]);
 
   useEffect(() => {
+    if (appointmentDate) setForm(f => ({ ...f, appointment_date: appointmentDate, start_time: "", end_time: "" }));
+  }, [appointmentDate]);
+
+  useEffect(() => {
     if (open && clinicId && clinicId !== "0") {
-      clinicsApi.getServices(clinicId).then(res => setServices(res.data.services || [])).catch(() => {});
-      patientsApi.getByClinic(clinicId, { limit: 100 }).then(res => setPatients(res.data.patients || [])).catch(() => {});
-      clinicsApi.getStaff(clinicId).then(res => {
-        const staff = res.data.staff || [];
-        const doc = staff.find((s: any) => s.role === "doctor" && s.is_active);
-        if (doc && !form.doctor_id) setForm(f => ({ ...f, doctor_id: doc.id || doc.user_id }));
-      }).catch(() => {});
+      const isPatient = getStoredUser()?.role === "patient";
+      setLoadingOptions(true);
+      Promise.all([
+        clinicsApi.getServices(clinicId),
+        clinicsApi.getById(clinicId),
+        isPatient ? Promise.resolve(null) : patientsApi.getByClinic(clinicId, { limit: 100 }),
+      ]).then(([serviceRes, clinicRes, patientRes]) => {
+        const availableDoctors = clinicRes?.data?.staff || [];
+        setServices(serviceRes?.data?.services || []);
+        setDoctors(availableDoctors);
+        setPatients(patientRes?.data?.patients || []);
+        setForm(f => ({
+          ...f,
+          patient_id: isPatient ? "" : (patientId || f.patient_id),
+          doctor_id: doctorId || (availableDoctors.some((d: any) => d.doctor_id === f.doctor_id) ? f.doctor_id : availableDoctors[0]?.doctor_id || ""),
+          start_time: "",
+          end_time: "",
+        }));
+      }).catch(() => setError("Unable to load doctors and booking options for this clinic."))
+        .finally(() => setLoadingOptions(false));
+    } else if (open) {
+      setError("Please select a clinic before booking an appointment.");
     }
-  }, [open, clinicId]);
+  }, [open, clinicId, doctorId, patientId]);
+
+  useEffect(() => {
+    if (!open || !clinicId || clinicId === "0" || !form.doctor_id || !form.appointment_date) {
+      setSlots([]);
+      return;
+    }
+    setLoadingSlots(true);
+    setSlots([]);
+    clinicsApi.getAvailableSlots(clinicId, {
+      date: form.appointment_date,
+      doctor_id: form.doctor_id,
+      service_id: form.service_id || undefined,
+    }).then(res => setSlots((res.data?.slots || []).filter((slot: any) => slot.available)))
+      .catch(err => setError(err.response?.data?.message || "Unable to load available times."))
+      .finally(() => setLoadingSlots(false));
+  }, [open, clinicId, form.doctor_id, form.appointment_date, form.service_id]);
 
   if (!open) return null;
 
   const handleServiceChange = (serviceId: string) => {
-    const s = services.find((srv: any) => srv.id === serviceId);
-    let endTime = form.end_time;
-    if (s && form.start_time) {
-      const [h, m] = form.start_time.split(':').map(Number);
-      const dur = parseInt(s.duration_minutes, 10) || 30;
-      const totalMins = h * 60 + m + dur;
-      const endH = Math.floor(totalMins / 60);
-      const endM = totalMins % 60;
-      endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
-    }
-    setForm(f => ({ ...f, service_id: serviceId, end_time: endTime }));
-  };
-
-  const handleStartTimeChange = (startTime: string) => {
-    const s = services.find((srv: any) => srv.id === form.service_id);
-    const dur = s ? parseInt(s.duration_minutes, 10) || 30 : 30;
-    const [h, m] = startTime.split(':').map(Number);
-    const totalMins = h * 60 + m + dur;
-    const endH = Math.floor(totalMins / 60);
-    const endM = totalMins % 60;
-    const endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
-    setForm(f => ({ ...f, start_time: startTime, end_time: endTime }));
+    setForm(f => ({ ...f, service_id: serviceId, start_time: "", end_time: "" }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.patient_id) {
+    const isPatient = getStoredUser()?.role === "patient";
+    if (!clinicId || clinicId === "0" || clinicId === "undefined") {
+      setError("Please select a clinic before booking an appointment.");
+      return;
+    }
+    if (!isPatient && !form.patient_id) {
       setError("Please select a patient");
       return;
     }
-    if (!form.appointment_date || !form.start_time) {
-      setError("Please fill in appointment date and start time");
+    if (!form.doctor_id) {
+      setError("Please select a doctor.");
+      return;
+    }
+    if (!form.appointment_date || !form.start_time || !form.end_time) {
+      setError("Please select a date and an available time.");
       return;
     }
     setSubmitting(true);
     setError("");
     try {
-      const activeClinicId = clinicId || "0";
-      await appointmentsApi.create(activeClinicId, form);
+      await appointmentsApi.create(clinicId, form);
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -121,9 +155,15 @@ export function BookAppointmentModal({
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
           {error && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl font-medium flex items-center gap-2"><AlertCircle size={14} className="flex-shrink-0" /> {error}</div>}
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Select Patient *</label>
+          {getStoredUser()?.role === "patient" ? (
+            <div className="rounded-xl border border-teal-100 bg-teal-50 px-4 py-3">
+              <p className="text-xs font-semibold text-teal-800">Patient</p>
+              <p className="text-sm font-bold text-slate-900">Booking for yourself</p>
+            </div>
+          ) : <div>
+            <label htmlFor="booking-patient" className="block text-xs font-semibold text-slate-600 mb-1.5">Patient *</label>
             <select
+              id="booking-patient"
               value={form.patient_id}
               onChange={e => setForm(f => ({ ...f, patient_id: e.target.value }))}
               className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -133,6 +173,16 @@ export function BookAppointmentModal({
               {patients.map(p => (
                 <option key={p.id} value={p.id}>{p.first_name} {p.last_name} ({p.phone || p.email || 'No contact'})</option>
               ))}
+            </select>
+          </div>}
+
+          <div>
+            <label htmlFor="booking-doctor" className="block text-xs font-semibold text-slate-600 mb-1.5">Doctor *</label>
+            <select id="booking-doctor" value={form.doctor_id} disabled={loadingOptions}
+              onChange={e => setForm(f => ({ ...f, doctor_id: e.target.value, start_time: "", end_time: "" }))}
+              className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50" required>
+              <option value="">{loadingOptions ? "Loading doctors..." : "Select a doctor"}</option>
+              {doctors.map((doctor: any) => <option key={doctor.doctor_id} value={doctor.doctor_id}>Dr. {doctor.first_name} {doctor.last_name} — {doctor.specialization || "General Medicine"}</option>)}
             </select>
           </div>
 
@@ -155,23 +205,25 @@ export function BookAppointmentModal({
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">Date *</label>
               <input
                 type="date"
+                min={localDate()}
                 value={form.appointment_date}
                 onChange={e => setForm(f => ({ ...f, appointment_date: e.target.value }))}
                 className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Start Time *</label>
-              <input
-                type="time"
-                value={form.start_time}
-                onChange={e => handleStartTimeChange(e.target.value)}
-                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
+            <div className="flex items-end"><div className="w-full rounded-xl border border-gray-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-600">{form.start_time ? `${form.start_time}–${form.end_time}` : "Choose a slot below"}</div></div>
           </div>
+
+          <fieldset>
+            <legend className="block text-xs font-semibold text-slate-600 mb-2">Available times *</legend>
+            {loadingSlots ? <p className="text-xs text-slate-500 py-3" role="status">Loading availability...</p> : slots.length ? (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {slots.map((slot: any) => <button type="button" key={slot.start_time} onClick={() => setForm(f => ({ ...f, start_time: slot.start_time, end_time: slot.end_time }))}
+                  className={`min-h-10 rounded-xl border text-xs font-semibold ${form.start_time === slot.start_time ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-gray-200 text-slate-700 hover:border-blue-300"}`}>{slot.start_time}</button>)}
+              </div>
+            ) : <p className="text-xs text-slate-500 rounded-xl bg-slate-50 p-3">No available slots for this doctor and date.</p>}
+          </fieldset>
 
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1.5">Consultation Mode</label>
@@ -214,7 +266,7 @@ export function BookAppointmentModal({
             </button>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || loadingOptions || loadingSlots || !form.start_time || !clinicId || clinicId === "0"}
               className="px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-colors flex items-center gap-2"
             >
               {submitting ? "Checking Availability..." : "Confirm Booking"}
@@ -299,6 +351,7 @@ export function RescheduleModal({
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">New Date *</label>
               <input
                 type="date"
+                min={localDate()}
                 value={date}
                 onChange={e => setDate(e.target.value)}
                 className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -592,19 +645,21 @@ export function CreateEMRModal({
 
 // ── 5. Create Prescription Modal ───────────────────────────────────────────────
 export function CreatePrescriptionModal({
-  open, onClose, clinicId, patientId, onSuccess,
+  open, onClose, clinicId, patientId, appointmentId, prescription, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   clinicId: string;
   patientId?: string;
+  appointmentId?: string;
+  prescription?: any;
   onSuccess: () => void;
 }) {
   const [selectedPatientId, setSelectedPatientId] = useState(patientId || "");
   const [diagnosis, setDiagnosis] = useState("");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState([
-    { medication_name: "Cetirizine 10mg", dosage: "1 tablet", frequency: "Once daily (1-0-0)", duration: "7 days", route: "oral", instructions: "Take at bedtime" },
+    { medication_name: "", dosage: "", frequency: "", duration: "", route: "", instructions: "" },
   ]);
   const [patients, setPatients] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -615,15 +670,34 @@ export function CreatePrescriptionModal({
   }, [patientId]);
 
   useEffect(() => {
+    if (!open) return;
+    if (prescription) {
+      setSelectedPatientId(prescription.patient_id || "");
+      setDiagnosis(prescription.diagnosis || "");
+      setNotes(prescription.notes || "");
+      setItems(prescription.items?.length ? prescription.items.map((item: any) => ({
+        medication_name: item.medication_name || "", dosage: item.dosage || "", frequency: item.frequency || "",
+        duration: item.duration || "", route: item.route || "", instructions: item.instructions || "",
+      })) : [{ medication_name: "", dosage: "", frequency: "", duration: "", route: "", instructions: "" }]);
+    } else {
+      setSelectedPatientId(patientId || "");
+      setDiagnosis("");
+      setNotes("");
+      setItems([{ medication_name: "", dosage: "", frequency: "", duration: "", route: "", instructions: "" }]);
+    }
+    setError("");
+  }, [open, prescription, patientId]);
+
+  useEffect(() => {
     if (open && clinicId && clinicId !== "0") {
-      patientsApi.getByClinic(clinicId, { limit: 100 }).then(res => setPatients(res.data.patients || [])).catch(() => {});
+      patientsApi.getByClinic(clinicId, { limit: 100 }).then(res => setPatients(res.data.patients || [])).catch(err => setError(err.response?.data?.message || "Unable to load this clinic's patients."));
     }
   }, [open, clinicId]);
 
   if (!open) return null;
 
   const handleAddItem = () => {
-    setItems([...items, { medication_name: "", dosage: "1 tablet", frequency: "Twice daily (1-0-1)", duration: "7 days", route: "oral", instructions: "Take after meals" }]);
+    setItems([...items, { medication_name: "", dosage: "", frequency: "", duration: "", route: "", instructions: "" }]);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -648,20 +722,26 @@ export function CreatePrescriptionModal({
       setError("Diagnosis is required");
       return;
     }
-    const validItems = items.filter(i => i.medication_name.trim());
-    if (validItems.length === 0) {
-      setError("At least one medication is required");
+    const validItems = items.filter(i => i.medication_name.trim() || i.dosage.trim() || i.frequency.trim());
+    if (validItems.length === 0 || validItems.some(i => !i.medication_name.trim() || !i.dosage.trim() || !i.frequency.trim())) {
+      setError("Each medication requires a name, dosage, and frequency.");
       return;
     }
     setSubmitting(true);
     setError("");
     try {
-      await prescriptionsApi.create(clinicId, {
+      const payload = {
         patient_id: selectedPatientId,
+        appointment_id: appointmentId || undefined,
         diagnosis: diagnosis.trim(),
         notes: notes || null,
         items: validItems,
-      });
+      };
+      if (prescription?.id) await prescriptionsApi.update(clinicId, prescription.id, payload);
+      else await prescriptionsApi.create(clinicId, payload);
+      setDiagnosis("");
+      setNotes("");
+      setItems([{ medication_name: "", dosage: "", frequency: "", duration: "", route: "", instructions: "" }]);
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -679,7 +759,7 @@ export function CreatePrescriptionModal({
             <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-semibold">
               <Pill size={16} />
             </div>
-            <h2 className="text-lg font-bold text-slate-900">Create Digital Prescription</h2>
+            <h2 className="text-lg font-bold text-slate-900">{prescription ? "Edit Digital Prescription" : "Create Digital Prescription"}</h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={18} /></button>
         </div>
@@ -691,6 +771,7 @@ export function CreatePrescriptionModal({
             <label className="block text-xs font-semibold text-slate-600 mb-1.5">Patient *</label>
             <select
               value={selectedPatientId}
+              disabled={Boolean(prescription)}
               onChange={e => setSelectedPatientId(e.target.value)}
               className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               required
@@ -814,13 +895,34 @@ export function ViewPrescriptionModal({
   onClose: () => void;
   prescription: any;
 }) {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
   if (!open || !prescription) return null;
+
+  const downloadPdf = async () => {
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      const response = await prescriptionsApi.downloadPdf(prescription.clinic_id, prescription.id);
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `prescription-${prescription.id}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setDownloadError(error.response?.data?.message || "Unable to generate this prescription PDF.");
+    } finally { setDownloading(false); }
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-gray-100" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-slate-50">
           <div className="flex items-center gap-2">
+            <button onClick={downloadPdf} disabled={downloading} className="px-3 py-1.5 text-xs font-semibold border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 flex items-center gap-1.5 text-indigo-700">
+              <Download size={13} /> {downloading ? "Generating..." : "Download PDF"}
+            </button>
             <Pill size={18} className="text-indigo-600" />
             <h2 className="text-lg font-bold text-slate-900">Digital Prescription</h2>
           </div>
@@ -833,14 +935,15 @@ export function ViewPrescriptionModal({
         </div>
 
         <div className="p-8 space-y-6 max-h-[75vh] overflow-y-auto">
+          {downloadError && <div role="alert" className="rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-700">{downloadError}</div>}
           {/* Header */}
           <div className="flex justify-between items-start border-b border-gray-100 pb-5">
             <div>
-              <h3 className="text-base font-bold text-slate-900">{prescription.clinic_name || "Rahman Medical Center"}</h3>
+              <h3 className="text-base font-bold text-slate-900">{prescription.clinic_name || "Clinic name unavailable"}</h3>
               <p className="text-xs text-slate-500">Doctor: Dr. {prescription.doctor_first_name} {prescription.doctor_last_name}</p>
             </div>
             <div className="text-right">
-              <p className="text-xs font-mono font-bold text-slate-900">Rx Date: {new Date(prescription.created_at || Date.now()).toLocaleDateString()}</p>
+              <p className="text-xs font-mono font-bold text-slate-900">Rx Date: {prescription.created_at ? new Date(prescription.created_at).toLocaleDateString() : "Unavailable"}</p>
               <p className="text-xs text-slate-500">Rx ID: {prescription.id?.substring(0, 8)}</p>
             </div>
           </div>
@@ -877,8 +980,8 @@ export function ViewPrescriptionModal({
                       <tr key={idx} className="hover:bg-slate-50/50">
                         <td className="p-3 font-semibold text-slate-900">{item.medication_name}</td>
                         <td className="p-3">{item.dosage || "1 dose"}</td>
-                        <td className="p-3">{item.frequency || "Once daily"}</td>
-                        <td className="p-3">{item.duration || "7 days"}</td>
+                        <td className="p-3">{item.frequency || "Not recorded"}</td>
+                        <td className="p-3">{item.duration || "Not recorded"}</td>
                         <td className="p-3 text-slate-500">{item.instructions || "As directed"}</td>
                       </tr>
                     ))
@@ -919,6 +1022,7 @@ export function AddPatientModal({
     last_name: "",
     phone: "",
     email: "",
+    address: "",
     date_of_birth: "",
     gender: "male",
     blood_group: "O+",
@@ -941,6 +1045,14 @@ export function AddPatientModal({
     setSubmitting(true);
     setError("");
     try {
+      if (!clinicId || clinicId === "0" || clinicId === "undefined") {
+        setError("Please select a clinic before creating the patient.");
+        return;
+      }
+      if (form.date_of_birth && form.date_of_birth > localDate()) {
+        setError("Date of birth cannot be in the future.");
+        return;
+      }
       await patientsApi.create(clinicId, form);
       onSuccess();
       onClose();
@@ -1015,6 +1127,7 @@ export function AddPatientModal({
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">Date of Birth</label>
               <input
                 type="date"
+                max={localDate()}
                 value={form.date_of_birth}
                 onChange={e => setForm(f => ({ ...f, date_of_birth: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1041,6 +1154,26 @@ export function AddPatientModal({
               >
                 {["O+","O-","A+","A-","B+","B-","AB+","AB-"].map(bg => <option key={bg} value={bg}>{bg}</option>)}
               </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Address</label>
+            <textarea value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
+              rows={2} placeholder="Street address, city, and postal area"
+              className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Emergency Contact</label>
+              <input value={form.emergency_contact_name} onChange={e => setForm(f => ({ ...f, emergency_contact_name: e.target.value }))}
+                placeholder="Contact name" className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Emergency Phone</label>
+              <input value={form.emergency_contact_phone} onChange={e => setForm(f => ({ ...f, emergency_contact_phone: e.target.value }))}
+                placeholder="Phone number" className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
 
@@ -1071,7 +1204,7 @@ export function AddPatientModal({
             </button>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !clinicId || clinicId === "0"}
               className="px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-colors"
             >
               {submitting ? "Registering..." : "Add Patient"}
@@ -1899,17 +2032,30 @@ export function SubmitReviewModal({
 
 // ── 15. Send Message Modal ─────────────────────────────────────────────────────
 export function SendMessageModal({
-  open, onClose, receiverId, onSuccess,
+  open, onClose, receiverId, receiverName, senderId, senderName, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   receiverId?: string;
+  receiverName?: string;
+  senderId?: string;
+  senderName?: string;
   onSuccess: () => void;
 }) {
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [recipients, setRecipients] = useState<any[]>([]);
+  const [selectedReceiverId, setSelectedReceiverId] = useState(receiverId || "");
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedReceiverId(receiverId || "");
+    messagesApi.getRecipients()
+      .then(response => setRecipients(response.data?.recipients || []))
+      .catch(err => setError(err.response?.data?.message || "Unable to load authorized message recipients."));
+  }, [open, receiverId]);
 
   if (!open) return null;
 
@@ -1917,9 +2063,15 @@ export function SendMessageModal({
     e.preventDefault();
     setSubmitting(true);
     setError("");
+    if (!selectedReceiverId) {
+      setError("Please select a recipient before sending a message.");
+      setSubmitting(false);
+      return;
+    }
     try {
       await messagesApi.sendMessage({
-        receiver_id: receiverId || "doctor",
+        sender_id: senderId,
+        receiver_id: selectedReceiverId,
         subject,
         message,
       });
@@ -1945,6 +2097,22 @@ export function SendMessageModal({
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl font-medium">{error}</div>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="message-sender" className="block text-xs font-semibold text-slate-600 mb-1.5">From</label>
+              <select id="message-sender" value={senderId || ""} disabled className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm bg-slate-50 text-slate-700">
+                <option value={senderId || ""}>{senderName || "Authenticated account"} ({getStoredUser()?.role || "user"})</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="message-recipient" className="block text-xs font-semibold text-slate-600 mb-1.5">To</label>
+              <select id="message-recipient" value={selectedReceiverId} onChange={event => setSelectedReceiverId(event.target.value)} className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm bg-white text-slate-700" required>
+                <option value="">Select recipient</option>
+                {receiverId && !recipients.some(recipient => recipient.id === receiverId) && <option value={receiverId}>{receiverName || "Selected recipient"}</option>}
+                {recipients.map(recipient => <option key={recipient.id} value={recipient.id}>{recipient.role === "doctor" ? "Dr. " : ""}{recipient.first_name} {recipient.last_name} — {recipient.role}</option>)}
+              </select>
+            </div>
+          </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1.5">Subject</label>
             <input
@@ -1973,7 +2141,7 @@ export function SendMessageModal({
             </button>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !selectedReceiverId || !message.trim()}
               className="px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-colors"
             >
               {submitting ? "Sending..." : "Send Message"}
@@ -1988,6 +2156,22 @@ export function SendMessageModal({
 
 
 // ── 17. View Medical Record Modal ──────────────────────────────────────────────
+export function UploadMedicalReportModal({ open, onClose, clinicId, patientId, onSuccess }: { open: boolean; onClose: () => void; clinicId: string; patientId: string; onSuccess?: () => void }) {
+  const [form, setForm] = useState({ title: '', report_type: 'Lab Result', file_name: '', file_url: '', description: '', report_date: localDate() });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  if (!open) return null;
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true); setError('');
+    try {
+      await medicalReportsApi.create(clinicId, { ...form, patient_id: patientId });
+      onSuccess?.(); onClose();
+    } catch (err: any) { setError(err.response?.data?.message || 'Unable to save medical report'); }
+    finally { setSaving(false); }
+  };
+  return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}><form onSubmit={submit} onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4"><div className="flex justify-between"><div><h2 className="font-bold text-slate-900">Upload Medical Report</h2><p className="text-xs text-slate-500">Store document metadata and a simulated or HTTPS reference.</p></div><button type="button" onClick={onClose}><X size={18}/></button></div>{error && <p className="text-xs text-rose-700 bg-rose-50 p-2 rounded">{error}</p>}<input required placeholder="Report title" value={form.title} onChange={e => setForm({...form,title:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm"/><div className="grid grid-cols-2 gap-3"><select value={form.report_type} onChange={e => setForm({...form,report_type:e.target.value})} className="border rounded-xl px-3 py-2 text-sm"><option>Lab Result</option><option>Imaging</option><option>Pathology</option><option>Other</option></select><input type="date" value={form.report_date} onChange={e => setForm({...form,report_date:e.target.value})} className="border rounded-xl px-3 py-2 text-sm"/></div><input required placeholder="File name (e.g. cbc-results.pdf)" value={form.file_name} onChange={e => setForm({...form,file_name:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm"/><input required placeholder="https://... or simulated://reports/..." value={form.file_url} onChange={e => setForm({...form,file_url:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm"/><textarea placeholder="Description" value={form.description} onChange={e => setForm({...form,description:e.target.value})} className="w-full border rounded-xl px-3 py-2 text-sm"/><div className="flex justify-end gap-2"><button type="button" onClick={onClose} className="px-4 py-2 text-sm">Cancel</button><button disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold">{saving?'Saving...':'Save Report'}</button></div></form></div>;
+}
+
 export function ViewMedicalRecordModal({
   open, onClose, record,
 }: {

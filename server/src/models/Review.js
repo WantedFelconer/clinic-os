@@ -22,7 +22,8 @@ const Review = {
   async findByClinic(clinicId, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const [rows] = await db.execute(
-      `SELECT r.*, p.first_name as patient_first_name, p.last_name as patient_last_name
+      `SELECT r.id, r.rating, r.comment, r.created_at, r.doctor_id,
+              CONCAT(p.first_name, ' ', LEFT(p.last_name, 1), '.') as reviewer_name
        FROM reviews r JOIN patients p ON r.patient_id = p.id
        WHERE r.clinic_id = ? AND r.is_approved = true
        ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
@@ -38,13 +39,28 @@ const Review = {
   async findByDoctor(doctorId, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const [rows] = await db.execute(
-      `SELECT r.*, p.first_name as patient_first_name, p.last_name as patient_last_name
+      `SELECT r.id, r.rating, r.comment, r.created_at,
+              CONCAT(p.first_name, ' ', LEFT(p.last_name, 1), '.') as reviewer_name
        FROM reviews r JOIN patients p ON r.patient_id = p.id
        WHERE r.doctor_id = ? AND r.is_approved = true
        ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
       [doctorId, limit, offset]
     );
-    return { reviews: rows, page, limit };
+    const [summary] = await db.execute(
+      `SELECT COUNT(*) as total, IFNULL(AVG(rating), 0) as average,
+              SUM(rating = 1) as rating_1, SUM(rating = 2) as rating_2,
+              SUM(rating = 3) as rating_3, SUM(rating = 4) as rating_4, SUM(rating = 5) as rating_5
+       FROM reviews WHERE doctor_id = ? AND is_approved = 1`,
+      [doctorId]
+    );
+    return {
+      reviews: rows,
+      summary: {
+        total: Number(summary[0]?.total || 0), average: Number(summary[0]?.average || 0),
+        distribution: [1, 2, 3, 4, 5].reduce((result, rating) => ({ ...result, [rating]: Number(summary[0]?.[`rating_${rating}`] || 0) }), {}),
+      },
+      page, limit,
+    };
   },
 
   async approve(id) {

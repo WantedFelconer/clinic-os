@@ -53,10 +53,12 @@ const Appointment = {
   async findById(id) {
     const [rows] = await db.execute(
       `SELECT a.*, p.first_name as patient_first_name, p.last_name as patient_last_name, p.phone as patient_phone, p.email as patient_email, p.user_id as patient_user_id,
+              c.is_active as clinic_is_active, c.timezone as clinic_timezone,
               u.first_name as doctor_first_name, u.last_name as doctor_last_name,
               cs.name as service_name, cs.price as service_price
        FROM appointments a
        JOIN patients p ON a.patient_id = p.id
+       JOIN clinics c ON a.clinic_id = c.id
        LEFT JOIN users u ON a.doctor_id = u.id
        LEFT JOIN clinic_services cs ON a.service_id = cs.id
        WHERE a.id = ?`,

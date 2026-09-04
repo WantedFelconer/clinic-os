@@ -10,7 +10,8 @@
     "db:migrate": "node db/migrate.js",
     "db:seed": "node db/seed.js",
     "db:reset": "node db/reset.js",
-    "test": "node test/runAllTests.js"
+    "test": "node test/runAllTests.js",
+    "test:unit": "node --test test/security_remediation.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

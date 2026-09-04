@@ -3,12 +3,55 @@ const { generateUUID } = require('../utils/helpers');
 const Notification = require('../models/Notification');
 
 const messageController = {
+  async getRecipients(req, res, next) {
+    try {
+      let recipients = [];
+      if (req.user.role === 'patient') {
+        [recipients] = await db.execute(
+          `SELECT DISTINCT recipient.id, recipient.first_name, recipient.last_name, recipient.role
+           FROM (
+             SELECT u.id, u.first_name, u.last_name, u.role
+             FROM patients p JOIN clinics c ON c.id = p.clinic_id AND c.is_active = 1
+             JOIN users u ON u.id = c.owner_id AND u.is_active = 1
+             WHERE p.user_id = ? AND p.is_active = 1
+             UNION
+             SELECT u.id, u.first_name, u.last_name, u.role
+             FROM patients p JOIN clinics c ON c.id = p.clinic_id AND c.is_active = 1
+             JOIN clinic_staff cs ON cs.clinic_id = c.id AND cs.is_active = 1
+             JOIN users u ON u.id = cs.user_id AND u.is_active = 1
+             WHERE p.user_id = ? AND p.is_active = 1
+           ) recipient
+           ORDER BY recipient.first_name, recipient.last_name`,
+          [req.user.id, req.user.id]
+        );
+      } else if (['doctor', 'assistant'].includes(req.user.role)) {
+        [recipients] = await db.execute(
+          `SELECT DISTINCT u.id, u.first_name, u.last_name, u.role
+           FROM patients p
+           JOIN clinics c ON c.id = p.clinic_id AND c.is_active = 1
+           LEFT JOIN clinic_staff cs ON cs.clinic_id = c.id AND cs.user_id = ? AND cs.is_active = 1
+           JOIN users u ON u.id = p.user_id AND u.is_active = 1
+           WHERE p.is_active = 1 AND (c.owner_id = ? OR cs.id IS NOT NULL)
+           ORDER BY u.first_name, u.last_name`,
+          [req.user.id, req.user.id]
+        );
+      }
+      res.json({ recipients });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async sendMessage(req, res, next) {
     try {
       const { receiver_id, subject, message, content } = req.body;
       const msgText = message || content;
       if (!receiver_id || !msgText) {
         return res.status(400).json({ message: 'Receiver ID and message content are required' });
+      }
+
+      if (req.body.sender_id && req.body.sender_id !== req.user.id) {
+        return res.status(403).json({ message: 'Sender identity must match the authenticated account.' });
       }
 
       if (receiver_id === req.user.id) {
@@ -60,7 +103,7 @@ const messageController = {
       await Notification.create({
         user_id: receiver_id,
         title: `New Message from ${senderName}`,
-        message: `${subject ? `${subject}: ` : ''}${msgText.substring(0, 80)}${msgText.length > 80 ? '...' : ''}`,
+        message: 'You received a new secure message. Sign in to ClinicOS to read it.',
         type: 'info',
         reference_type: 'message',
         reference_id: id,

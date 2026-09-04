@@ -6,6 +6,7 @@ const Package = require('../models/Package');
 const Appointment = require('../models/Appointment');
 const Notification = require('../models/Notification');
 const AuditLog = require('../models/AuditLog');
+const { createTextPdf } = require('../utils/pdf');
 
 const paymentController = {
   async create(req, res, next) {
@@ -107,7 +108,7 @@ const paymentController = {
         tax: parsedTax,
         total_amount: calculatedTotal,
         payment_method: payment_method || 'cash',
-        payment_status: payment_status || 'pending',
+        payment_status: 'pending',
         notes: notes || null,
       });
 
@@ -164,6 +165,34 @@ const paymentController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  async downloadReceipt(req, res, next) {
+    try {
+      const payment = await Payment.findById(req.params.id);
+      if (!payment || payment.clinic_id !== req.params.clinicId) return res.status(404).json({ message: 'Payment not found in this clinic.' });
+      if (req.user.role === 'patient') {
+        const patient = await Patient.findById(payment.patient_id);
+        if (!patient || patient.user_id !== req.user.id) return res.status(403).json({ message: 'Forbidden: You cannot download another patient receipt.' });
+      }
+      if (payment.payment_status !== 'completed' || !payment.receipt_number) return res.status(409).json({ message: 'A receipt is generated only after successful payment.' });
+      const pdf = createTextPdf([
+        `Receipt number: ${payment.receipt_number}`,
+        `Invoice number: ${payment.invoice_number}`,
+        `Patient: ${payment.patient_first_name} ${payment.patient_last_name}`,
+        `Payment date: ${payment.payment_date}`,
+        `Method: ${payment.payment_method}`,
+        `Transaction: ${payment.transaction_id}`,
+        `Base amount: ${payment.amount}`,
+        `Discount: ${payment.discount}`,
+        `Tax: ${payment.tax}`,
+        `Total paid: ${payment.total_amount}`,
+      ], 'ClinicOS Payment Receipt');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="receipt-${payment.receipt_number}.pdf"`);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(pdf);
+    } catch (error) { next(error); }
   },
 
   async getByClinic(req, res, next) {
@@ -241,9 +270,13 @@ const paymentController = {
       }
 
       // Simulated Transaction ID generation
-      const simTxn = transaction_id || `SIM-TXN-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      const simTxn = status === 'completed'
+        ? `SIM-TXN-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`
+        : (transaction_id || existing.transaction_id);
 
-      const payment = await Payment.updateStatus(req.params.id, status, simTxn);
+      const receiptNumber = status === 'completed' ? `RCT-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}` : null;
+      const payment = await Payment.updateStatus(req.params.id, existing.payment_status, status, simTxn, receiptNumber);
+      if (!payment) return res.status(409).json({ message: 'Payment status changed concurrently. Refresh and try again.' });
 
       await AuditLog.log({
         user_id: req.user.id,

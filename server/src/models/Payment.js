@@ -144,11 +144,16 @@ const Payment = {
     return { payments: rows, total: parseInt(countRows[0]?.count || 0, 10), page, limit };
   },
 
-  async updateStatus(id, status, transactionId) {
-    await db.execute(
-      `UPDATE payments SET payment_status = ?, transaction_id = IFNULL(?, transaction_id), payment_date = CASE WHEN ? = 'completed' THEN NOW() ELSE payment_date END, updated_at = NOW() WHERE id = ?`,
-      [status, transactionId ?? null, status, id]
+  async updateStatus(id, expectedStatus, status, transactionId, receiptNumber = null) {
+    const [result] = await db.execute(
+      `UPDATE payments SET payment_status = ?, transaction_id = IFNULL(?, transaction_id),
+       payment_date = CASE WHEN ? = 'completed' THEN NOW() ELSE payment_date END,
+       receipt_number = CASE WHEN ? = 'completed' THEN ? ELSE receipt_number END,
+       receipt_generated_at = CASE WHEN ? = 'completed' THEN NOW() ELSE receipt_generated_at END,
+       updated_at = NOW() WHERE id = ? AND payment_status = ?`,
+      [status, transactionId ?? null, status, status, receiptNumber, status, id, expectedStatus]
     );
+    if (!result.affectedRows) return null;
     return this.findById(id);
   },
 

@@ -28,10 +28,13 @@ const clinicAccess = async (req, res, next) => {
     if (!clinicId || clinicId === '0' || clinicId === 'undefined') {
       return res.status(400).json({ message: 'Valid Clinic ID is required.' });
     }
+    if (!/^[A-Za-z0-9-]{1,36}$/.test(String(clinicId))) {
+      return res.status(400).json({ message: 'Clinic ID format is invalid.' });
+    }
 
     // Verify clinic exists and is active
     const [clinicRows] = await db.query(
-      'SELECT id, owner_id, is_active FROM clinics WHERE id = ?',
+      'SELECT id, owner_id, is_active, timezone FROM clinics WHERE id = ?',
       [clinicId]
     );
 
@@ -41,6 +44,10 @@ const clinicAccess = async (req, res, next) => {
 
     const clinic = clinicRows[0];
     req.clinic = clinic;
+
+    if (!clinic.is_active) {
+      return res.status(403).json({ message: 'This clinic workspace is inactive.' });
+    }
 
     // Platform admins: Allowed for general clinic management and administrative endpoints,
     // but blocked from unrestricted EMR/Prescription clinical data access unless explicitly authorized.

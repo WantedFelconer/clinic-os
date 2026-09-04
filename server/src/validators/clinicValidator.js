@@ -1,7 +1,19 @@
-const { body } = require('express-validator');
+const { body, query } = require('express-validator');
 const validate = require('./validate');
+const { isValidTimeZone } = require('../utils/dateTime');
 
 const clinicValidator = {
+  search: validate([
+    query('query').optional().trim().isLength({ max: 120 }),
+    query('city').optional().trim().isLength({ max: 100 }),
+    query('location').optional().trim().isLength({ max: 180 }),
+    query('specialization').optional().trim().isLength({ max: 120 }),
+  ]),
+  availableSlots: validate([
+    query('date').isISO8601({ strict: true }).withMessage('Date must use YYYY-MM-DD'),
+    query('doctor_id').optional().matches(/^[A-Za-z0-9-]{1,36}$/),
+    query('service_id').optional().matches(/^[A-Za-z0-9-]{1,36}$/),
+  ]),
   create: validate([
     body('name')
       .trim()
@@ -24,6 +36,7 @@ const clinicValidator = {
       .optional()
       .trim()
       .isLength({ max: 100 }),
+    body('timezone').optional().custom(isValidTimeZone).withMessage('Timezone must be a valid IANA timezone name'),
   ]),
 
   update: validate([
@@ -43,6 +56,22 @@ const clinicValidator = {
       .isEmail()
       .withMessage('Valid clinic email is required')
       .normalizeEmail(),
+    body('timezone').optional().custom(isValidTimeZone).withMessage('Timezone must be a valid IANA timezone name'),
+  ]),
+
+  branding: validate([
+    body('logo_url')
+      .optional({ nullable: true })
+      .custom((value) => value === null || (/^(https:\/\/|simulated:\/\/)[^\s]{1,2020}$/i.test(value)))
+      .withMessage('Logo reference must be an HTTPS URL, simulated:// reference, or null'),
+    body('banner_url')
+      .optional({ nullable: true })
+      .custom((value) => value === null || (/^(https:\/\/|simulated:\/\/)[^\s]{1,2020}$/i.test(value)))
+      .withMessage('Banner reference must be an HTTPS URL, simulated:// reference, or null'),
+    body().custom((value) => {
+      const keys = Object.keys(value || {});
+      return keys.length > 0 && keys.every((key) => ['logo_url', 'banner_url'].includes(key));
+    }).withMessage('Only logo_url and banner_url may be changed through branding settings'),
   ]),
 
   addStaff: validate([

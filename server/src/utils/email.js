@@ -27,18 +27,12 @@ const sendEmail = async ({ to, toName, subject, html }) => {
   const senderEmail = (process.env.BREVO_SENDER_EMAIL || '').replace(/^["']|["']$/g, '').trim();
   const senderName = (process.env.BREVO_SENDER_NAME || 'ClinicOS').replace(/^["']|["']$/g, '').trim();
 
-  // If in test environment or Brevo API key is not configured, use safe dev/mock fallback
-  if (process.env.NODE_ENV === 'test' || !apiKey || !senderEmail) {
-    if (process.env.NODE_ENV !== 'test') {
-      console.log('\n═══════════════════════════════════════════════════════════');
-      console.log('  [Brevo Email Dev Fallback - API Key / Sender not set]');
-      console.log(`  To: ${to} ${toName ? `(${toName})` : ''}`);
-      console.log(`  Subject: ${subject}`);
-      console.log('───────────────────────────────────────────────────────────');
-      console.log(html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
-      console.log('═══════════════════════════════════════════════════════════\n');
-    }
+  if (process.env.NODE_ENV === 'test') {
     return { success: true, messageId: 'mock-dev-delivery-id' };
+  }
+  if (!apiKey || !senderEmail) {
+    if (process.env.NODE_ENV === 'development') return { success: true, messageId: 'mock-dev-delivery-id' };
+    throw new Error('Transactional email is not configured. Set BREVO_API_KEY and BREVO_SENDER_EMAIL.');
   }
 
   const payload = {
@@ -295,6 +289,19 @@ const sendAppointmentRescheduleNotification = ({ to, patientName, clinicName, ne
   return sendEmail({ to, toName: patientName, subject: `Appointment Rescheduled at ${safeClinic}`, html });
 };
 
+const sendAppointmentReminder = ({ to, patientName, clinicName, doctorName, date, time }) => {
+  const safePatient = escapeHtml(patientName) || 'Patient';
+  const safeClinic = escapeHtml(clinicName) || 'Clinic';
+  const safeDoctor = escapeHtml(doctorName);
+  const safeDate = escapeHtml(date);
+  const safeTime = escapeHtml(time);
+  const html = `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px">
+    <h2>Appointment reminder</h2><p>Hi <strong>${safePatient}</strong>,</p>
+    <p>This is a reminder for your appointment at <strong>${safeClinic}</strong>${safeDoctor ? ` with <strong>${safeDoctor}</strong>` : ''}.</p>
+    <p><strong>Date:</strong> ${safeDate}<br><strong>Time:</strong> ${safeTime}</p></div>`;
+  return sendEmail({ to, toName: patientName, subject: `Appointment reminder — ${safeClinic}`, html });
+};
+
 module.exports = {
   sendEmail,
   sendOTP,
@@ -302,4 +309,5 @@ module.exports = {
   sendAppointmentBookingNotification,
   sendAppointmentStatusNotification,
   sendAppointmentRescheduleNotification,
+  sendAppointmentReminder,
 };

@@ -1,7 +1,13 @@
 const { body, param, query } = require('express-validator');
 const validate = require('./validate');
+const { isValidDateOnly } = require('../utils/dateTime');
 
 const appointmentValidator = {
+  list: validate([
+    query('status').optional().isIn(['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show']),
+    query('date').optional().custom(value => isValidDateOnly(value)).withMessage('Date must be a real date in YYYY-MM-DD format'),
+    query('doctorId').optional().matches(/^[A-Za-z0-9-]{1,36}$/).withMessage('Doctor ID is invalid'),
+  ]),
   create: validate([
     body('appointment_date')
       .trim()

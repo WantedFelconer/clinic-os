@@ -20,6 +20,7 @@ router.get('/appointments', authenticate, authorize('patient'), paginationValida
 router.get('/medical-records', authenticate, authorize('patient'), paginationValidator, authController.getMyMedicalRecords);
 router.get('/prescriptions', authenticate, authorize('patient'), paginationValidator, authController.getMyPrescriptions);
 router.get('/payments', authenticate, authorize('patient'), paginationValidator, authController.getMyPayments);
+router.get('/medical-reports', authenticate, authorize('patient'), paginationValidator, authController.getMyMedicalReports);
 
 router.get('/notifications', authenticate, paginationValidator, authController.getNotifications);
 router.put('/notifications/read-all', authenticate, authController.markAllNotificationsRead);

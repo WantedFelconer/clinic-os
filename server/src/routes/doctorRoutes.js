@@ -5,7 +5,7 @@ const { authorize } = require('../middleware/rbac');
 const { doctorValidator, paginationValidator } = require('../validators');
 
 // Public endpoints
-router.get('/search', paginationValidator, doctorController.search);
+router.get('/search', paginationValidator, doctorValidator.search, doctorController.search);
 router.get('/:id', doctorController.getById);
 router.get('/:id/reviews', paginationValidator, doctorController.getDoctorReviews);
 

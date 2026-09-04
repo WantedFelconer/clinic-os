@@ -6,6 +6,7 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const AuditLog = require('../models/AuditLog');
 const bcrypt = require('bcryptjs');
+const { publicClinic, publicDoctor } = require('../serializers/public');
 
 const clinicController = {
   async create(req, res, next) {
@@ -30,7 +31,7 @@ const clinicController = {
 
   async getMyClinics(req, res, next) {
     try {
-      const clinics = await Clinic.findByOwner(req.user.id);
+      const clinics = await Clinic.findAccessibleByUser(req.user.id);
       res.json({ clinics });
     } catch (error) {
       next(error);
@@ -41,9 +42,9 @@ const clinicController = {
     try {
       const clinic = await Clinic.findById(req.params.id);
       if (!clinic) return res.status(404).json({ message: 'Clinic not found' });
-      const staff = await Clinic.getStaff(req.params.id);
+      const staff = (await Clinic.getPublicDoctors(req.params.id)).map(publicDoctor);
       const schedules = await Clinic.getSchedules(req.params.id);
-      res.json({ clinic, staff, schedules });
+      res.json({ clinic: publicClinic(clinic), staff, schedules });
     } catch (error) {
       next(error);
     }
@@ -69,11 +70,31 @@ const clinicController = {
     }
   },
 
+  async updateBranding(req, res, next) {
+    try {
+      const changes = {};
+      if (Object.prototype.hasOwnProperty.call(req.body, 'logo_url')) changes.logo_url = req.body.logo_url;
+      if (Object.prototype.hasOwnProperty.call(req.body, 'banner_url')) changes.banner_url = req.body.banner_url;
+      const clinic = await Clinic.update(req.params.id, changes);
+      await AuditLog.log({
+        user_id: req.user.id,
+        action: 'CLINIC_BRANDING_UPDATED',
+        entity_type: 'clinic',
+        entity_id: req.params.id,
+        details: { changed_fields: Object.keys(changes) },
+        ip_address: req.ip,
+      });
+      res.json({ message: 'Clinic branding updated', clinic });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async search(req, res, next) {
     try {
-      const { query, city, specialization, page, limit } = req.query;
-      const result = await Clinic.search({ query, city, specialization, page: parseInt(page, 10) || 1, limit: parseInt(limit, 10) || 20 });
-      res.json(result);
+      const { query, city, location, specialization, page, limit } = req.query;
+      const result = await Clinic.search({ query, city: city || location, specialization, page: parseInt(page, 10) || 1, limit: parseInt(limit, 10) || 20 });
+      res.json({ ...result, clinics: result.clinics.map(publicClinic) });
     } catch (error) {
       next(error);
     }
@@ -81,8 +102,13 @@ const clinicController = {
 
   async getAvailableSlots(req, res, next) {
     try {
-      const { date, service_id } = req.query;
-      const result = await Clinic.getAvailableSlots(req.params.clinicId, date, service_id);
+      const { date, service_id, doctor_id } = req.query;
+      const clinic = await Clinic.findById(req.params.clinicId);
+      if (!clinic || !clinic.is_active) return res.status(404).json({ message: 'Active clinic not found.' });
+      if (doctor_id && !(await require('../middleware/rbac').validateDoctorClinicMembership(doctor_id, req.params.clinicId))) {
+        return res.status(400).json({ message: 'Selected doctor is not active in this clinic.' });
+      }
+      const result = await Clinic.getAvailableSlots(req.params.clinicId, date, service_id, doctor_id, true, clinic.timezone || 'UTC');
       res.json(result);
     } catch (error) {
       next(error);
@@ -148,7 +174,7 @@ const clinicController = {
 
         user = await User.create({
           email: cleanEmail,
-          password: password || 'password123',
+          password,
           role,
           first_name: (first_name || 'Staff').trim(),
           last_name: (last_name || 'Member').trim(),

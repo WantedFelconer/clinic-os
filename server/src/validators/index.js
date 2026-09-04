@@ -8,6 +8,7 @@ const reviewValidator = require('./reviewValidator');
 const clinicValidator = require('./clinicValidator');
 const paginationValidator = require('./paginationValidator');
 const doctorValidator = require('./doctorValidator');
+const commonValidator = require('./commonValidator');
 
 module.exports = {
   authValidator,
@@ -20,4 +21,5 @@ module.exports = {
   clinicValidator,
   paginationValidator,
   doctorValidator,
+  commonValidator,
 };

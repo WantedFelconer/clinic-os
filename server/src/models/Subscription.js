@@ -1,34 +1,9 @@
 const db = require('../config/database');
 const { generateUUID } = require('../utils/helpers');
+const { canonicalFeature, normalizeFeatureSet } = require('../config/features');
 
 function normalizeFeatures(features) {
-  if (!features) return {};
-  if (typeof features === 'string') {
-    try {
-      features = JSON.parse(features);
-    } catch {
-      features = [features];
-    }
-  }
-  if (Array.isArray(features)) {
-    const obj = {};
-    for (const f of features) {
-      if (typeof f === 'string') {
-        const key = f.toLowerCase().replace(/[\s-]+/g, '_');
-        obj[key] = true;
-        if (key.includes('analytic')) obj.analytics = true;
-        if (key.includes('emr') || key.includes('medical_record')) obj.advanced_emr = true;
-        if (key.includes('staff') || key.includes('assistant')) obj.staff_management = true;
-        if (key.includes('report') || key.includes('financial') || key.includes('revenue')) obj.financial_reports = true;
-        if (key.includes('prescription')) obj.digital_prescriptions = true;
-      }
-    }
-    return obj;
-  }
-  if (typeof features === 'object') {
-    return features;
-  }
-  return {};
+  return normalizeFeatureSet(features);
 }
 
 function parsePlan(plan) {
@@ -149,23 +124,23 @@ const Subscription = {
     if (billingCycle === 'quarterly') days = 90;
     else if (billingCycle === 'yearly') days = 365;
 
-    // Deactivate previous active subscriptions for this clinic
-    await db.execute(
-      `UPDATE clinic_subscriptions SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE clinic_id = ? AND status = 'active'`,
-      [clinicId]
-    );
-
     const id = generateUUID();
     const startDate = new Date();
     const endDate = new Date(Date.now() + days * 86400000);
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
 
-    await db.execute(
-      `INSERT INTO clinic_subscriptions (id, clinic_id, plan_id, status, start_date, end_date, auto_renew)
-       VALUES (?, ?, ?, 'active', ?, ?, 1)`,
-      [id, clinicId, planId, startDateStr, endDateStr]
-    );
+    await db.transaction(async (connection) => {
+      await connection.execute(
+        `UPDATE clinic_subscriptions SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE clinic_id = ? AND status = 'active'`,
+        [clinicId]
+      );
+      await connection.execute(
+        `INSERT INTO clinic_subscriptions (id, clinic_id, plan_id, status, start_date, end_date, auto_renew)
+         VALUES (?, ?, ?, 'active', ?, ?, 1)`,
+        [id, clinicId, planId, startDateStr, endDateStr]
+      );
+    });
     return this.getClinicSubscription(clinicId);
   },
 
@@ -220,6 +195,19 @@ const Subscription = {
     };
   },
 
+  async getLatestClinicSubscription(clinicId) {
+    const [rows] = await db.execute(
+      `SELECT cs.*, sp.name as plan_name, sp.price, sp.features, sp.billing_cycle,
+              sp.max_doctors, sp.max_patients, sp.max_staff
+       FROM clinic_subscriptions cs JOIN subscription_plans sp ON sp.id = cs.plan_id
+       WHERE cs.clinic_id = ? ORDER BY cs.end_date DESC, cs.created_at DESC LIMIT 1`,
+      [clinicId]
+    );
+    if (!rows[0]) return null;
+    const parsed = parsePlan(rows[0]);
+    return { ...parsed, structured_features: normalizeFeatures(rows[0].features), is_default: false };
+  },
+
   async cancelClinicSubscription(clinicId) {
     const [active] = await db.execute(
       "SELECT id FROM clinic_subscriptions WHERE clinic_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
@@ -264,23 +252,10 @@ const Subscription = {
   async hasFeature(clinicId, featureName) {
     const sub = await this.getClinicSubscription(clinicId);
     if (!sub) return false;
-    const cleanKey = featureName.toLowerCase().replace(/[\s-]+/g, '_');
+    const cleanKey = canonicalFeature(featureName);
     const structured = sub.structured_features || normalizeFeatures(sub.features);
 
-    if (structured[cleanKey]) return true;
-    if (cleanKey === 'analytics' && (structured.analytics || structured.revenue_analytics || structured.advanced_analytics)) return true;
-    if (cleanKey === 'advanced_emr' && (structured.advanced_emr || structured.emr_notes)) return true;
-    if (cleanKey === 'staff_management' && structured.staff_management) return true;
-    if (cleanKey === 'financial_reports' && (structured.financial_reports || structured.analytics)) return true;
-
-    // Backward compatibility with raw string matching
-    if (Array.isArray(sub.features)) {
-      return sub.features.some(f =>
-        typeof f === 'string' && (f.toLowerCase().includes(featureName.toLowerCase()) || f.toLowerCase().includes('unlimited'))
-      );
-    }
-
-    return false;
+    return Boolean(structured[cleanKey]);
   },
 
   async getAllByAdmin(page = 1, limit = 20) {
@@ -337,16 +312,25 @@ const Subscription = {
   },
 
   async renewSubscription(clinicId) {
-    const [expired] = await db.execute(
+    const [subscriptions] = await db.execute(
       `SELECT cs.*, sp.billing_cycle FROM clinic_subscriptions cs
        JOIN subscription_plans sp ON cs.plan_id = sp.id
-       WHERE cs.clinic_id = ? AND cs.status = 'expired' AND cs.auto_renew = 1
-       ORDER BY cs.end_date DESC LIMIT 1`,
+       WHERE cs.clinic_id = ? ORDER BY cs.end_date DESC LIMIT 1`,
       [clinicId]
     );
-    if (!expired[0]) return null;
-
-    return this.subscribe(clinicId, expired[0].plan_id, expired[0].billing_cycle || 'monthly');
+    const current = subscriptions[0];
+    if (!current) return null;
+    const days = current.billing_cycle === 'yearly' ? 365 : current.billing_cycle === 'quarterly' ? 90 : 30;
+    const today = new Date();
+    const oldEnd = new Date(`${current.end_date}T00:00:00`);
+    const base = oldEnd > today ? oldEnd : today;
+    const newEnd = new Date(base.getTime() + days * 86400000).toISOString().slice(0, 10);
+    await db.execute(
+      `UPDATE clinic_subscriptions SET status = 'active', start_date = CASE WHEN end_date < CURRENT_DATE THEN CURRENT_DATE ELSE start_date END,
+       end_date = ?, auto_renew = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [newEnd, current.id]
+    );
+    return this.getClinicSubscription(clinicId);
   },
 };
 

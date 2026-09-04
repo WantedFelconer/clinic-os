@@ -6,6 +6,10 @@ dist/
 dist-ssr/
 *.local
 
+# Existing deployments version the production bundle.
+!dist/
+!dist/**
+
 # Environment variables
 .env
 .env.*

@@ -4,7 +4,7 @@ const { authenticate } = require('../middleware/auth');
 const { authorize, clinicAccess } = require('../middleware/rbac');
 const { appointmentValidator, paginationValidator } = require('../validators');
 
-router.get('/', authenticate, clinicAccess, paginationValidator, appointmentController.getByClinic);
+router.get('/', authenticate, clinicAccess, appointmentValidator.list, paginationValidator, appointmentController.getByClinic);
 router.post('/', authenticate, clinicAccess, appointmentValidator.create, appointmentController.create);
 router.get('/upcoming', authenticate, clinicAccess, appointmentController.getUpcoming);
 router.get('/my', authenticate, authorize('patient'), paginationValidator, appointmentController.getMyAppointments);

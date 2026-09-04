@@ -7,6 +7,8 @@ const AuditLog = require('../models/AuditLog');
 const db = require('../config/database');
 const { calculateEndTime } = require('../utils/helpers');
 const { validateDoctorClinicMembership } = require('../middleware/rbac');
+const { ensureAppointmentModificationAllowed } = require('../utils/appointments');
+const { isValidDateOnly, validateAppointmentClock } = require('../utils/dateTime');
 const {
   sendAppointmentBookingNotification,
   sendAppointmentStatusNotification,
@@ -15,22 +17,16 @@ const {
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-async function validateScheduleAndConflict({ clinic_id, doctor_id, service_id, appointment_date, start_time, end_time, excludeId }) {
+async function validateScheduleAndConflict({ clinic_id, doctor_id, service_id, appointment_date, start_time, end_time, excludeId, timezone = 'UTC' }) {
   if (!appointment_date || !start_time) {
     return { error: 'Appointment date and start time are required.' };
   }
+  if (!isValidDateOnly(appointment_date)) return { error: 'Appointment date must be a real date in YYYY-MM-DD format.' };
 
-  // Reject past dates
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   const [y, m, d] = appointment_date.split('-').map(Number);
   const apptDate = new Date(y, m - 1, d, 12, 0, 0);
   if (isNaN(apptDate.getTime())) {
     return { error: 'Invalid appointment date format (expected YYYY-MM-DD).' };
-  }
-  const apptDateOnly = new Date(y, m - 1, d);
-  if (apptDateOnly < today) {
-    return { error: 'Cannot book an appointment in the past.' };
   }
   const dayOfWeek = apptDate.getDay();
 
@@ -57,9 +53,8 @@ async function validateScheduleAndConflict({ clinic_id, doctor_id, service_id, a
   const schedStart = schedule.start_time.substring(0, 5);
   const schedEnd = schedule.end_time.substring(0, 5);
 
-  if (normStart >= normEnd) {
-    return { error: 'Appointment end time must be after start time.' };
-  }
+  const clockValidation = validateAppointmentClock(appointment_date, normStart, normEnd, timezone);
+  if (!clockValidation.valid) return { error: clockValidation.error };
 
   if (normStart < schedStart || normEnd > schedEnd) {
     return {
@@ -91,6 +86,7 @@ const appointmentController = {
   async create(req, res, next) {
     try {
       const clinicId = req.params.clinicId;
+      const clinic = req.clinic?.id ? req.clinic : await Clinic.findById(clinicId);
       let doctorId = req.body.doctor_id;
 
       // 1. Doctor verification
@@ -123,7 +119,10 @@ const appointmentController = {
       if (req.user && req.user.role === 'patient') {
         let patient = await Patient.findByUserId(req.user.id, clinicId);
         if (!patient) {
+          const [profileRows] = await db.execute('SELECT * FROM patient_profiles WHERE user_id = ?', [req.user.id]);
+          const profile = profileRows[0] || {};
           patient = await Patient.create({
+            ...profile,
             user_id: req.user.id,
             clinic_id: clinicId,
             first_name: req.user.first_name,
@@ -153,6 +152,7 @@ const appointmentController = {
         appointment_date: req.body.appointment_date,
         start_time: req.body.start_time,
         end_time: req.body.end_time,
+        timezone: clinic?.timezone || 'UTC',
       });
 
       if (validation.isConflict) {
@@ -310,12 +310,9 @@ const appointmentController = {
         }
       }
 
-      // Terminal state check
-      const terminalStates = ['completed', 'cancelled', 'no_show'];
-      if (terminalStates.includes(existing.status)) {
-        return res.status(400).json({
-          message: `Cannot transition appointment from terminal status '${existing.status}'. Reschedule instead if needed.`,
-        });
+      if (status === 'cancelled') {
+        const modification = ensureAppointmentModificationAllowed(existing);
+        if (!modification.allowed) return res.status(modification.status).json({ message: modification.message });
       }
 
       // Forward-only state machine enforcement
@@ -393,20 +390,15 @@ const appointmentController = {
       if (!existing || existing.clinic_id !== req.params.clinicId) {
         return res.status(404).json({ message: 'Appointment not found in this clinic' });
       }
-
-      const terminalStates = ['completed', 'cancelled', 'no_show'];
-      if (terminalStates.includes(existing.status)) {
-        return res.status(400).json({
-          message: `Cannot reschedule an appointment with terminal status '${existing.status}'.`,
-        });
-      }
-
       // Patient validation: Patients can only reschedule their own appointment
       if (req.user && req.user.role === 'patient') {
         if (existing.patient_user_id !== req.user.id) {
           return res.status(403).json({ message: 'Forbidden: You cannot reschedule another patient appointment' });
         }
       }
+
+      const modification = ensureAppointmentModificationAllowed(existing);
+      if (!modification.allowed) return res.status(modification.status).json({ message: modification.message });
 
       const { appointment_date, start_time, end_time, notes } = req.body;
       const targetStartTime = start_time || existing.start_time;
@@ -428,6 +420,7 @@ const appointmentController = {
         start_time: targetStartTime,
         end_time: targetEndTime,
         excludeId: existing.id,
+        timezone: req.clinic?.timezone || 'UTC',
       });
 
       if (validation.isConflict) {

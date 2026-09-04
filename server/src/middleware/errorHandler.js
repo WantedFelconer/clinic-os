@@ -1,9 +1,6 @@
 const errorHandler = (err, req, res, next) => {
-  console.error('Error:', err.message);
-  console.error('Stack:', err.stack);
-
-  // In development, expose the actual error message for debugging
   const isDev = process.env.NODE_ENV === 'development';
+  console.error('Request failed:', isDev ? err.stack : err.message);
 
   // MySQL duplicate entry (errno 1062)
   if (err.errno === 1062) {

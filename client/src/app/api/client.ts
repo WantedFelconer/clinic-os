@@ -72,9 +72,7 @@ apiClient.interceptors.response.use(
         config: error.config || ({} as any),
       };
     } else if (error.response.status === 401) {
-      localStorage.removeItem('clinic_os_token');
-      localStorage.removeItem('clinic_os_user');
-      localStorage.removeItem('clinic_os_clinic_id');
+      Object.keys(localStorage).filter(key => key.startsWith('clinic_os_')).forEach(key => localStorage.removeItem(key));
       // Dispatch an authentication expiration event for graceful UI transition
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('auth:expired'));

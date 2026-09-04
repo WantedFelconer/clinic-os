@@ -7,4 +7,5 @@ export const subscriptionsApi = {
   getMySubscription: (clinicId: string) => apiClient.get(`/clinics/${clinicId}/subscriptions/my`),
   getLimits: (clinicId: string) => apiClient.get(`/clinics/${clinicId}/subscriptions/limits`),
   cancelSubscription: (clinicId: string) => apiClient.post(`/clinics/${clinicId}/subscriptions/cancel`),
+  renewSubscription: (clinicId: string) => apiClient.post(`/clinics/${clinicId}/subscriptions/renew`),
 };

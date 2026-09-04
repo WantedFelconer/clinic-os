@@ -1,74 +1,57 @@
-# ClinicOS — Software Requirements Specification (SRS) Traceability Matrix
+# ClinicOS SRS Traceability — Verified 2026-09-04
 
-This document maps functional and non-functional requirements to their implementing source files, database tables, API routes, and automated test suites.
+**PASS** means the frontend/API/authorization/validation/business logic/persistence workflow is present in source. **PARTIAL** means a material layer or verification step remains. **FUTURE** is explicitly deferred. Database-backed workflows still require execution against a dedicated migrated test database before release.
 
----
+| FR | Requirement | Status | Evidence / limitation |
+|---|---|---|---|
+| FR-1 | Patient/doctor registration | PASS | Auth form, validator, controller, persistence |
+| FR-2 | Unique email | PASS | Unique constraint and duplicate handling |
+| FR-3 | Password hashing | PASS | bcrypt create/update |
+| FR-4 | Verify email before login | PASS | Hashed expiring OTP and login gate |
+| FR-5 | Login | PASS | JWT login and role response |
+| FR-6 | Password recovery | PASS | Expiring, digest-stored reset token and email workflow |
+| FR-7 | RBAC | PASS | Role, tenant and ownership checks |
+| FR-8 | Role dashboards | PASS | React role dispatch |
+| FR-9 | Multiple clinics | PASS | Owned/active-staff query, persisted safe default, selector/refetch, backend tenant enforcement |
+| FR-10 | Doctor profile | PASS | Qualifications, specialty, experience, fee CRUD |
+| FR-11 | Operating schedules | PASS | UI/API, validation, transactional persistence |
+| FR-12 | Clinic services | PASS | Authorized CRUD |
+| FR-13 | Consultation packages | PASS | Plan-gated authorized CRUD |
+| FR-14 | Clinic branding | PASS | Validated metadata, authorization, persistence, preview/replace/remove |
+| FR-15 | Patient profile | PASS | Account-level patient_profiles plus clinic-row synchronization for demographics and emergency data |
+| FR-16 | Clinic search | PASS | Name, location and derived specialization with pagination |
+| FR-17 | Doctor specialty/availability | PASS | Date filter uses schedules/bookings; UI books selected doctor |
+| FR-18 | Consultation/treatment history | PASS | History APIs and portal |
+| FR-19 | Secure personal medical data | PASS | Ownership and confidential filtering |
+| FR-20 | Book appointments | PASS | Self-booking, explicit doctor choice, live slots, clinic-local time checks and conflict transaction |
+| FR-21 | Reschedule/cancel before start | PASS | Reusable start-time/clinic/state guard and conflict validation |
+| FR-22 | Doctor schedule management | PASS | Date-filtered seven-day calendar, clinic appointment views and state transitions |
+| FR-23 | Confirm/cancel/remind notifications | PARTIAL | Deduplicated workflow exists; DB/email integration not executed here |
+| FR-24 | Appointment history | PASS | Persistent paginated history |
+| FR-25 | Create/update EMR | PASS | Doctor membership and tenant/patient checks |
+| FR-26 | EMR clinical fields | PASS | Diagnosis, symptoms, treatment, notes, follow-up |
+| FR-27 | Authorized EMR access | PASS | Doctor/owning-patient; admin/assistant clinical reads blocked |
+| FR-28 | Complete medical history | PASS | Appointments, EMR, prescriptions, reports, payments |
+| FR-29 | Digital prescriptions | PASS | Transactional create/edit of prescription/items; author, appointment, patient and tenant checks |
+| FR-30 | View/download prescription | PASS | Portal viewer and authorized live database-to-PDF response |
+| FR-31 | Prescription history | PASS | Persistent patient/clinic history with item retrieval |
+| FR-32 | Online payment | PASS (SIMULATED) | Explicit simulated transition; gateway excluded |
+| FR-33 | Invoice/payment/receipt | PASS | Pending invoice, completed simulated payment, receipt PDF |
+| FR-34 | Revenue/payment history | PASS | Plan-gated ledger/revenue query |
+| FR-35 | Email notifications | PARTIAL | Brevo code exists; credentials and live delivery unverified |
+| FR-36 | Secure messages | PASS | Authenticated sender enforcement, relationship-scoped recipient discovery and relationship checks |
+| FR-37 | Video consultations | FUTURE | Explicit future enhancement |
+| FR-38 | Rate doctor and clinic | PASS | Completed-owned appointment, 1–5, duplicate guard; feeds both aggregates |
+| FR-39 | Doctor reviews/ratings | PASS | Average, total, distribution, recent anonymized text, dashboard |
+| FR-40 | Subscribe to plans | PASS | Owner-authorized simulated subscription |
+| FR-41 | Renewal/expiration | PASS | Expiration enforcement and billing-cycle renewal |
+| FR-42 | Admin plan management | PASS | Admin create/update/deactivate |
+| FR-43 | Premium restrictions | PARTIAL | Central backend gates cover major routes including messaging; a unified frontend/advanced-EMR boundary remains incomplete |
 
-## 1. Authentication & User Management (FR-1 to FR-7)
+## Non-functional notes
 
-| Req ID | Requirement Description | Implementation Files | API Endpoints | Automated Test Reference | Status |
-| :--- | :--- | :--- | :--- | :--- | :---: |
-| **FR-1** | User Registration & Role Selection | `authController.js`, `User.js` | `POST /api/auth/register` | `sprint1_security_suite.js: #1-3` | **PASS** |
-| **FR-2** | OTP Verification & Expiration | `authController.js`, `User.js` | `POST /api/auth/verify-otp` | `sprint1_security_suite.js: #4` | **PASS** |
-| **FR-3** | JWT Authentication & Login | `authController.js`, `auth.js` | `POST /api/auth/login` | `sprint1_security_suite.js: #6-7` | **PASS** |
-| **FR-4** | Brute Force Attempt Locking | `authController.js` | `POST /api/auth/verify-otp` | `sprint1_security_suite.js: #5` | **PASS** |
-| **FR-5** | Password Reset via Secure OTP | `authController.js` | `POST /api/auth/forgot-password` | `sprint1_security_suite.js: #8` | **PASS** |
-| **FR-6** | User Profile Update | `authController.js` | `PUT /api/auth/profile` | `sprint2_workflow_suite.js: #1` | **PASS** |
-| **FR-7** | Role-Based Access Control (RBAC) | `middleware/auth.js` | All protected routes | `sprint1_security_suite.js: #9-11` | **PASS** |
-
----
-
-## 2. Clinic Management & Multi-Tenancy (FR-8 to FR-14)
-
-| Req ID | Requirement Description | Implementation Files | API Endpoints | Automated Test Reference | Status |
-| :--- | :--- | :--- | :--- | :--- | :---: |
-| **FR-8** | Clinic Provisioning & Ownership | `clinicController.js`, `Clinic.js` | `POST /api/clinics` | `sprint1_security_suite.js: #12` | **PASS** |
-| **FR-9** | Multi-Tenant Data Isolation | `middleware/clinicAccess.js` | `/api/clinics/:clinicId/*` | `sprint1_security_suite.js: #14-16` | **PASS** |
-| **FR-10** | Clinic Profile Configuration | `clinicController.js` | `PUT /api/clinics/:clinicId` | `sprint2_workflow_suite.js: #2` | **PASS** |
-| **FR-11** | Service Catalog Management | `clinicController.js`, `Service.js` | `POST /api/clinics/:clinicId/services` | `sprint2_workflow_suite.js: #3` | **PASS** |
-| **FR-12** | Bundled Service Packages | `clinicController.js`, `Package.js` | `POST /api/clinics/:clinicId/packages` | `sprint2_workflow_suite.js: #4` | **PASS** |
-| **FR-13** | Staff/Assistant Provisioning | `clinicController.js`, `Clinic.js` | `POST /api/clinics/:clinicId/staff` | `sprint2_workflow_suite.js: #5` | **PASS** |
-| **FR-14** | Assistant Permission Boundary | `middleware/auth.js` | `/api/clinics/:clinicId/emr` | `sprint4_e2e_regression_suite.js: #3` | **PASS** |
-
----
-
-## 3. Patient CRM & Appointments (FR-15 to FR-21)
-
-| Req ID | Requirement Description | Implementation Files | API Endpoints | Automated Test Reference | Status |
-| :--- | :--- | :--- | :--- | :--- | :---: |
-| **FR-15** | Walk-in Patient Registration | `patientController.js`, `Patient.js` | `POST /api/clinics/:clinicId/patients` | `sprint2_workflow_suite.js: #6-8` | **PASS** |
-| **FR-16** | Doctor/Clinic Directory Discovery | `doctorController.js`, `Doctor.js` | `GET /api/doctors/search` | `sprint2_workflow_suite.js: #9-11` | **PASS** |
-| **FR-17** | Conflict-Free Slot Booking | `appointmentController.js` | `POST /api/clinics/:clinicId/appointments` | `final_forensic_suite.js: #1-4` | **PASS** |
-| **FR-18** | Appointment Double-Booking Guard | `appointmentController.js` | `POST /api/clinics/:clinicId/appointments` | `final_forensic_suite.js: #3` | **PASS** |
-| **FR-19** | Appointment State Machine | `appointmentController.js` | `PUT .../appointments/:id/status` | `sprint2_workflow_suite.js: #12-14` | **PASS** |
-| **FR-20** | Patient Cancellation Rules | `appointmentController.js` | `PUT .../appointments/:id/cancel` | `sprint2_workflow_suite.js: #15` | **PASS** |
-| **FR-21** | Patient Portal Consultation History | `appointmentController.js` | `GET .../appointments/my` | `sprint2_workflow_suite.js: #16` | **PASS** |
-
----
-
-## 4. EMR, Prescriptions & Reviews (FR-22 to FR-28)
-
-| Req ID | Requirement Description | Implementation Files | API Endpoints | Automated Test Reference | Status |
-| :--- | :--- | :--- | :--- | :--- | :---: |
-| **FR-22** | Structured SOAP EMR Creation | `medicalRecordController.js` | `POST .../medical-records` | `sprint2_workflow_suite.js: #17-19` | **PASS** |
-| **FR-23** | Doctor-Only EMR Authorization | `middleware/auth.js` | `POST .../medical-records` | `sprint2_workflow_suite.js: #20` | **PASS** |
-| **FR-24** | Multi-Item Digital Prescriptions | `prescriptionController.js` | `POST .../prescriptions` | `sprint2_workflow_suite.js: #21-23` | **PASS** |
-| **FR-25** | Anti-IDOR EMR Access Control | `medicalRecordController.js` | `GET .../medical-records/:id` | `sprint4_e2e_regression_suite.js: #5a` | **PASS** |
-| **FR-26** | Verified Appointment Review Gate | `reviewController.js`, `Review.js` | `POST .../reviews` | `sprint2_workflow_suite.js: #26-28` | **PASS** |
-| **FR-27** | Duplicate Review Prevention | `reviewController.js` | `POST .../reviews` | `sprint2_workflow_suite.js: #29` | **PASS** |
-| **FR-28** | Admin Review Moderation Queue | `adminController.js` | `PUT /api/admin/reviews/:id/approve` | `sprint3_financial_admin_suite.js: #26-27` | **PASS** |
-
----
-
-## 5. Billing, Subscriptions & Admin (FR-29 to FR-36)
-
-| Req ID | Requirement Description | Implementation Files | API Endpoints | Automated Test Reference | Status |
-| :--- | :--- | :--- | :--- | :--- | :---: |
-| **FR-29** | Server-Authoritative Invoice Math | `paymentController.js`, `Payment.js` | `POST .../payments` | `sprint3_financial_admin_suite.js: #1-4` | **PASS** |
-| **FR-30** | Duplicate Invoice Prevention | `paymentController.js` | `POST .../payments` | `sprint3_financial_admin_suite.js: #5` | **PASS** |
-| **FR-31** | Simulated Payment Gateway Sandbox | `paymentController.js` | `PUT .../payments/:id/status` | `sprint3_financial_admin_suite.js: #6-9` | **PASS** |
-| **FR-32** | Pure MySQL Analytics Engine | `clinicController.js` | `GET .../analytics` | `sprint3_financial_admin_suite.js: #14-16` | **PASS** |
-| **FR-33** | Subscription Tier Limits (Staff/Doctor)| `models/Subscription.js` | `POST .../staff` | `sprint3_financial_admin_suite.js: #10-13` | **PASS** |
-| **FR-34** | Platform Admin User Lifecycle | `adminController.js` | `PUT /api/admin/users/:id/status` | `sprint3_financial_admin_suite.js: #17-21` | **PASS** |
-| **FR-35** | Admin Self-Deactivation Guard | `adminController.js` | `PUT /api/admin/users/:id/status` | `sprint3_financial_admin_suite.js: #19` | **PASS** |
-| **FR-36** | System Audit Log Telemetry | `models/AuditLog.js` | `GET /api/admin/audit-logs` | `sprint3_financial_admin_suite.js: #30-32` | **PASS** |
+- 16 focused tests pass for HTTPS, JWT, CORS, public DTOs, audit sanitization, tenant context, sender identity, prescription edit ownership, date/time logic and PDF generation/content.
+- Session inactivity and OTP throttling remain single-instance state.
+- Response-time/load targets were not measured; no three-second or concurrency claim is made.
+- 99.9% availability and backups require deployment monitoring, redundancy and managed backups.
+- The UI is responsive, but modularity and URL routing remain partial because the React application is still large and page-state based.

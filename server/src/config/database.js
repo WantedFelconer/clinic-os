@@ -1,11 +1,7 @@
 const mysql = require('mysql2/promise');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
-
-// Production safety check: Ensure JWT_SECRET is configured
-if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-  console.warn('WARNING: A secure JWT_SECRET should be configured in production environment.');
-}
 
 const useSsl =
   process.env.DB_SSL === 'true' ||
@@ -15,9 +11,15 @@ const useSsl =
     process.env.DB_HOST &&
     !['localhost', '127.0.0.1'].includes(process.env.DB_HOST));
 
-const sslConfig = useSsl
-  ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' }
-  : undefined;
+if (process.env.NODE_ENV === 'production' && useSsl && process.env.DB_SSL_REJECT_UNAUTHORIZED === 'false') {
+  throw new Error('DB_SSL_REJECT_UNAUTHORIZED=false is forbidden in production.');
+}
+
+const sslConfig = useSsl ? {
+  rejectUnauthorized: process.env.NODE_ENV === 'production' || process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
+  ...(process.env.DB_SSL_CA_PATH ? { ca: fs.readFileSync(path.resolve(process.env.DB_SSL_CA_PATH), 'utf8') } : {}),
+  ...(process.env.DB_SSL_CA_BASE64 ? { ca: Buffer.from(process.env.DB_SSL_CA_BASE64, 'base64').toString('utf8') } : {}),
+} : undefined;
 
 const connectionLimit = parseInt(process.env.DB_CONNECTION_LIMIT, 10) || (process.env.VERCEL ? 10 : 20);
 

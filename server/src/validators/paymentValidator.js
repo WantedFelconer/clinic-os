@@ -24,9 +24,7 @@ const paymentValidator = {
       .isIn(['cash', 'card', 'online', 'mobile_banking'])
       .withMessage('Payment method must be cash, card, online, or mobile_banking'),
     body('payment_status')
-      .optional()
-      .isIn(['pending', 'completed', 'failed', 'refunded'])
-      .withMessage('Invalid payment status'),
+      .not().exists().withMessage('New invoices always start in pending status'),
   ]),
 
   updateStatus: validate([

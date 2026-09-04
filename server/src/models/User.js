@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { generateUUID } = require('../utils/helpers');
 
 const User = {
@@ -92,16 +93,18 @@ const User = {
   },
 
   async setResetToken(email, token, expires) {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     await db.execute(
       'UPDATE users SET reset_password_token = ?, reset_password_expires = ? WHERE email = ?',
-      [token, expires, email]
+      [tokenHash, expires, email]
     );
   },
 
   async findByResetToken(token) {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const [rows] = await db.execute(
       'SELECT id, email FROM users WHERE reset_password_token = ? AND reset_password_expires > NOW()',
-      [token]
+      [tokenHash]
     );
     return rows[0];
   },

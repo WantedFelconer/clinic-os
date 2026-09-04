@@ -75,7 +75,8 @@ const subscriptionController = {
         return res.status(400).json({ message: 'Valid Clinic ID is required' });
       }
       const subscription = await Subscription.getClinicSubscription(clinicId);
-      res.json({ subscription });
+      const latest = subscription?.is_default ? await Subscription.getLatestClinicSubscription(clinicId) : null;
+      res.json({ subscription: latest || subscription });
     } catch (error) {
       next(error);
     }
@@ -125,6 +126,20 @@ const subscriptionController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  async renewSubscription(req, res, next) {
+    try {
+      const clinicId = req.params.clinicId;
+      const clinic = await Clinic.findById(clinicId);
+      if (!clinic || (req.user.role !== 'admin' && clinic.owner_id !== req.user.id)) {
+        return res.status(403).json({ message: 'Only the clinic owner can renew this subscription.' });
+      }
+      const subscription = await Subscription.renewSubscription(clinicId);
+      if (!subscription) return res.status(404).json({ message: 'No subscription is available to renew.' });
+      await AuditLog.log({ user_id: req.user.id, action: 'SUBSCRIPTION_RENEWED', entity_type: 'clinic_subscription', entity_id: subscription.id, details: { clinic_id: clinicId, end_date: subscription.end_date }, ip_address: req.ip });
+      res.json({ message: 'Subscription renewed successfully using simulated billing.', subscription });
+    } catch (error) { next(error); }
   },
 
   async getAllSubscriptions(req, res, next) {

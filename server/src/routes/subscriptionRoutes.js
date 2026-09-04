@@ -13,5 +13,6 @@ router.get('/my', authenticate, clinicAccess, subscriptionController.getMySubscr
 router.get('/limits', authenticate, clinicAccess, subscriptionController.getLimits);
 router.post('/subscribe', authenticate, authorize('doctor'), clinicAccess, subscriptionController.subscribe);
 router.post('/cancel', authenticate, authorize('doctor'), clinicAccess, subscriptionController.cancelSubscription);
+router.post('/renew', authenticate, authorize('doctor'), clinicAccess, subscriptionController.renewSubscription);
 
 module.exports = router;

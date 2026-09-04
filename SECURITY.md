@@ -1,8 +1,10 @@
 # ClinicOS Security Architecture & Hardening Guide
 
+Verified 2026-09-04: the distributable environment file was removed. Rotate the database password, JWT secret, and Brevo key that were configured in that copy. Production now uses strict CORS, verified database TLS, JWT issuer/audience/algorithm checks, HTTPS redirects, trusted-proxy handling, HSTS, public response serializers, and recursive audit-PHI sanitization. See FINAL_AUDIT.md for limitations and test evidence.
+
 ## 1. Executive Security Summary
 
-ClinicOS is engineered with a defense-in-depth security model designed to safeguard sensitive Protected Health Information (PHI), enforce multi-tenant isolation, prevent Insecure Direct Object References (IDOR), and eliminate race conditions in concurrent medical operations.
+ClinicOS applies layered controls for protected health information, tenant isolation, insecure direct-object references, and appointment concurrency. These source controls do not replace a deployment security review, migrated-database integration testing, monitoring, backups, or incident response.
 
 ---
 
@@ -10,7 +12,7 @@ ClinicOS is engineered with a defense-in-depth security model designed to safegu
 
 ### 2.1. Cryptographic OTP Generation & Brute-Force Defense
 - **Entropy & Randomness**: One-Time Passwords (OTPs) for registration and multi-factor email verification are generated using Node.js `crypto.randomInt(100000, 1000000)`. Pseudo-random generators (`Math.random()`) are strictly forbidden.
-- **Expiration**: Verification OTPs carry an enforced 15-minute expiration timestamp.
+- **Expiration**: Verification OTPs have a configurable expiry (`OTP_EXPIRATION_MINUTES`, 10 minutes by default).
 - **Attempt Throttling**: The verification endpoint tracks consecutive failed attempts. After 5 failed verification attempts, the active code is invalidated, and the verification endpoint is rate-limited for 15 minutes.
 - **Leakage Prevention**: Verification OTPs are never exposed in production API responses or client-facing error messages.
 
@@ -20,6 +22,7 @@ ClinicOS is engineered with a defense-in-depth security model designed to safegu
 
 ### 2.3. JWT Token Security & Production Fail-Safe
 - **Production Guard**: If `NODE_ENV === 'production'`, the server verifies that `process.env.JWT_SECRET` is defined and does not match insecure defaults; otherwise, the server refuses to boot and fails fast.
+- **Reset Tokens**: Password-reset bearer tokens are stored as SHA-256 digests rather than plaintext.
 - **Inactivity Timeout Tracker (NFR-9)**: Active sessions are subject to a 30-minute inactivity sliding window. Inactive sessions are revoked upon subsequent request.
 - **Instant Deactivation Enforcement**: Every authenticated request queries database user status (`is_active`). Deactivated accounts are instantly rejected with HTTP 401/403.
 
@@ -90,7 +93,7 @@ All incoming client requests pass through modular validation rules before reachi
 
 ## 7. Audit Logging & Compliance
 
-All sensitive business domain events and status changes are permanently recorded in the MySQL `audit_logs` table:
+Sensitive business-domain events and status changes are recorded in the MySQL `audit_logs` table. The audit sanitizer retains identifiers and state transitions while recursively removing clinical content and secrets:
 - `LOGIN` & `LOGIN_FAILED`
 - `PASSWORD_RESET_REQUESTED` & `PASSWORD_RESET_COMPLETED`
 - `USER_ACTIVATED` & `USER_DEACTIVATED`

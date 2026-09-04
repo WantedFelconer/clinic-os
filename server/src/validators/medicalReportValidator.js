@@ -7,6 +7,7 @@ const medicalReportValidator = {
       .trim()
       .notEmpty()
       .withMessage('Patient ID is required'),
+    body('title').trim().notEmpty().withMessage('Report title is required').isLength({ max: 255 }),
     body('report_type')
       .trim()
       .notEmpty()
@@ -16,10 +17,13 @@ const medicalReportValidator = {
     body('file_url')
       .trim()
       .notEmpty()
-      .withMessage('File URL is required'),
+      .withMessage('File reference is required')
+      .custom((value) => /^(https:\/\/|simulated:\/\/)[^\s]{1,2020}$/i.test(value))
+      .withMessage('File reference must use HTTPS or simulated://'),
+    body('file_name').trim().notEmpty().withMessage('File name is required').isLength({ max: 255 }),
     body('description')
       .optional()
-      .trim(),
+      .trim().isLength({ max: 2000 }),
     body('report_date')
       .optional({ checkFalsy: true })
       .trim()

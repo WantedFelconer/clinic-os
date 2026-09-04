@@ -3,8 +3,10 @@ const MedicalRecord = require('../models/MedicalRecord');
 const Prescription = require('../models/Prescription');
 const Appointment = require('../models/Appointment');
 const Payment = require('../models/Payment');
+const MedicalReport = require('../models/MedicalReport');
 const AuditLog = require('../models/AuditLog');
 const db = require('../config/database');
+const { operationalPatient } = require('../serializers/patient');
 
 const patientController = {
   async create(req, res, next) {
@@ -25,7 +27,13 @@ const patientController = {
         targetUserId = req.user.id;
       }
 
+      let linkedAccount = null;
       if (targetUserId) {
+        const [accountRows] = await db.execute('SELECT id, role, is_active, first_name, last_name, email, phone FROM users WHERE id = ?', [targetUserId]);
+        if (!accountRows[0] || accountRows[0].role !== 'patient' || !accountRows[0].is_active) {
+          return res.status(400).json({ message: 'Linked account must be an active patient account.' });
+        }
+        linkedAccount = accountRows[0];
         const existing = await Patient.findByUserId(targetUserId, clinicId);
         if (existing) {
           return res.status(400).json({ message: 'Patient already registered in this clinic.' });
@@ -34,6 +42,12 @@ const patientController = {
 
       const patient = await Patient.create({
         ...req.body,
+        ...(linkedAccount ? {
+          first_name: linkedAccount.first_name,
+          last_name: linkedAccount.last_name,
+          email: linkedAccount.email,
+          phone: linkedAccount.phone,
+        } : {}),
         user_id: targetUserId,
         clinic_id: clinicId,
       });
@@ -43,7 +57,7 @@ const patientController = {
         action: 'PATIENT_CREATED',
         entity_type: 'patient',
         entity_id: patient.id,
-        details: { clinic_id: clinicId, first_name: patient.first_name, last_name: patient.last_name },
+        details: { clinic_id: clinicId, patient_id: patient.id },
         ip_address: req.ip,
       });
 
@@ -67,7 +81,7 @@ const patientController = {
         }
       }
 
-      res.json({ patient });
+      res.json({ patient: ['assistant', 'admin'].includes(req.user.role) ? operationalPatient(patient) : patient });
     } catch (error) {
       next(error);
     }
@@ -88,11 +102,13 @@ const patientController = {
       }
 
       // Fetch EMR records, appointments, prescriptions, and payments
-      const includeConfidential = req.user.role !== 'patient';
-      const [recordsResult, apptsResult, prescsResult, paymentsResult] = await Promise.all([
-        MedicalRecord.findByPatient(patient.id, 1, 50, includeConfidential),
+      const includeConfidential = req.user.role === 'doctor';
+      const assistantView = req.user.role === 'assistant';
+      const [recordsResult, reportsResult, apptsResult, prescsResult, paymentsResult] = await Promise.all([
+        assistantView ? Promise.resolve({ records: [] }) : MedicalRecord.findByPatient(patient.id, 1, 50, includeConfidential),
+        MedicalReport.findByPatient(patient.id, 1, 50),
         Appointment.findByPatient(patient.id, 1, 50),
-        Prescription.findByPatient(patient.id, 1, 50),
+        assistantView ? Promise.resolve({ prescriptions: [] }) : Prescription.findByPatient(patient.id, 1, 50),
         Payment.findByPatient(patient.id, 1, 50),
       ]);
 
@@ -104,8 +120,9 @@ const patientController = {
       );
 
       res.json({
-        patient,
+        patient: assistantView ? operationalPatient(patient) : patient,
         medical_records: recordsResult.records || [],
+        medical_reports: reportsResult.reports || [],
         appointments: apptsResult.appointments || [],
         prescriptions: enrichedPrescriptions,
         payments: paymentsResult.payments || [],
@@ -126,7 +143,7 @@ const patientController = {
       const limit = Math.min(Math.max(1, rawLimit), 100);
       const search = (req.query.search || '').trim();
       const result = await Patient.findByClinic(req.params.clinicId, page, limit, search);
-      res.json(result);
+      res.json({ ...result, patients: ['assistant', 'admin'].includes(req.user.role) ? result.patients.map(operationalPatient) : result.patients });
     } catch (error) {
       next(error);
     }
@@ -151,6 +168,9 @@ const patientController = {
       delete safeUpdates.patient_id;
       delete safeUpdates.clinic_id;
       delete safeUpdates.user_id;
+      if (req.user.role === 'assistant' || req.user.role === 'admin') {
+        ['allergies', 'chronic_conditions', 'blood_group'].forEach(field => delete safeUpdates[field]);
+      }
 
       const patient = await Patient.update(req.params.id, safeUpdates);
 
@@ -159,7 +179,7 @@ const patientController = {
         action: 'PATIENT_UPDATED',
         entity_type: 'patient',
         entity_id: req.params.id,
-        details: { clinic_id: req.params.clinicId, updates: safeUpdates },
+        details: { clinic_id: req.params.clinicId, patient_id: req.params.id, changed_fields: Object.keys(safeUpdates) },
         ip_address: req.ip,
       });
 

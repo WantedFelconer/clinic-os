@@ -1,5 +1,6 @@
 const { body } = require('express-validator');
 const validate = require('./validate');
+const { validateDateOfBirth } = require('../utils/dateTime');
 
 const authValidator = {
   register: validate([
@@ -110,8 +111,17 @@ const authValidator = {
       .withMessage('Gender must be male, female, or other'),
     body('date_of_birth')
       .optional({ checkFalsy: true })
-      .isISO8601()
-      .withMessage('Date of birth must be a valid ISO8601 date (YYYY-MM-DD)'),
+      .custom((value) => {
+        const result = validateDateOfBirth(value);
+        if (!result.valid) throw new Error(result.error);
+        return true;
+      }),
+    body('address').optional({ checkFalsy: true }).trim().isLength({ max: 2000 }),
+    body('blood_group').optional({ checkFalsy: true }).trim().isLength({ max: 5 }),
+    body('allergies').optional({ checkFalsy: true }).trim().isLength({ max: 5000 }),
+    body('chronic_conditions').optional({ checkFalsy: true }).trim().isLength({ max: 5000 }),
+    body('emergency_contact_name').optional({ checkFalsy: true }).trim().isLength({ max: 255 }),
+    body('emergency_contact_phone').optional({ checkFalsy: true }).trim().isLength({ max: 20 }),
     body('role')
       .not()
       .exists()

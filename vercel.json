@@ -3,6 +3,12 @@
   "framework": "vite",
   "buildCommand": "npm run build --prefix client",
   "outputDirectory": "client/dist",
+  "crons": [
+    {
+      "path": "/api/internal/appointment-reminders",
+      "schedule": "0 * * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",

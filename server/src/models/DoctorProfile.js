@@ -76,10 +76,10 @@ const DoctorProfile = {
     return this.findByUserId(userId);
   },
 
-  async search({ query, specialty, city, page = 1, limit = 20 }) {
+  async search({ query, specialty, city, availabilityDate, page = 1, limit = 20 }) {
     const offset = (page - 1) * limit;
     let sql = `
-      SELECT u.id as doctor_id, u.first_name, u.last_name, u.email, u.phone, u.avatar_url,
+      SELECT u.id as doctor_id, u.first_name, u.last_name, u.avatar_url,
              dp.qualifications, dp.specialization, dp.experience_years, dp.consultation_fee, dp.bio,
              (SELECT IFNULL(AVG(r.rating), 0) FROM reviews r WHERE r.doctor_id = u.id AND r.is_approved = true) as avg_rating,
              (SELECT COUNT(*) FROM reviews r WHERE r.doctor_id = u.id AND r.is_approved = true) as reviews_count,
@@ -135,28 +135,64 @@ const DoctorProfile = {
       countParams.push(term);
     }
 
-    sql += ` ORDER BY avg_rating DESC, u.first_name ASC LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
+    sql += ` ORDER BY avg_rating DESC, u.first_name ASC`;
+    if (!availabilityDate) {
+      sql += ' LIMIT ? OFFSET ?';
+      params.push(limit, offset);
+    } else {
+      sql += ' LIMIT 500';
+    }
 
     const [rows] = await db.execute(sql, params);
-    const [countRows] = await db.execute(countSql, countParams);
+    const [countRows] = availabilityDate ? [[{ count: rows.length }]] : await db.execute(countSql, countParams);
+
+    let availableRows = rows;
+    if (availabilityDate) {
+      const Clinic = require('./Clinic');
+      const checks = await Promise.all(rows.map(async (doctor) => {
+        const [clinics] = await db.execute(
+          `SELECT DISTINCT c.id FROM clinics c
+           LEFT JOIN clinic_staff cs ON cs.clinic_id = c.id AND cs.user_id = ? AND cs.is_active = 1
+           WHERE c.is_active = 1 AND (c.owner_id = ? OR cs.id IS NOT NULL)`,
+          [doctor.doctor_id, doctor.doctor_id]
+        );
+        const availability = await Promise.all(clinics.map(async ({ id }) => ({
+          id,
+          result: await Clinic.getAvailableSlots(id, availabilityDate, null, doctor.doctor_id, true),
+        })));
+        const availableClinicIds = availability
+          .filter(({ result }) => result.available && result.slots.some((slot) => slot.available))
+          .map(({ id }) => id);
+        return availableClinicIds.length ? { ...doctor, available_clinic_ids: availableClinicIds } : null;
+      }));
+      availableRows = checks.filter(Boolean);
+    }
+
+    const pagedRows = availabilityDate ? availableRows.slice(offset, offset + limit) : availableRows;
 
     return {
-      doctors: rows.map(r => ({
+      doctors: pagedRows.map(r => ({
         ...r,
         avg_rating: parseFloat(r.avg_rating) || 0,
         reviews_count: parseInt(r.reviews_count, 10) || 0,
         experience_years: parseInt(r.experience_years, 10) || 0,
         consultation_fee: parseFloat(r.consultation_fee) || 0,
       })),
-      total: parseInt(countRows[0]?.count || 0, 10),
+      total: availabilityDate ? availableRows.length : parseInt(countRows[0]?.count || 0, 10),
       page,
       limit,
     };
   },
 
   async getDoctorDetails(doctorId) {
-    const profile = await this.findByUserId(doctorId);
+    const [profileRows] = await db.execute(
+      `SELECT u.id as doctor_id, u.id as user_id, u.first_name, u.last_name, u.avatar_url,
+              dp.qualifications, dp.specialization, dp.experience_years, dp.consultation_fee, dp.bio
+       FROM users u LEFT JOIN doctor_profiles dp ON dp.user_id = u.id
+       WHERE u.id = ? AND u.role = 'doctor' AND u.is_active = 1`,
+      [doctorId]
+    );
+    const profile = profileRows[0];
     if (!profile) return null;
 
     // Get clinics doctor works at (owned or staff)

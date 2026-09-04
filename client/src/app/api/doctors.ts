@@ -25,7 +25,7 @@ export interface DoctorProfileData {
 }
 
 export const doctorsApi = {
-  search: async (params?: { query?: string; specialty?: string; city?: string; page?: number; limit?: number }) => {
+  search: async (params?: { query?: string; specialty?: string; city?: string; availability_date?: string; page?: number; limit?: number }) => {
     const res = await apiClient.get('/doctors/search', { params });
     return res.data;
   },

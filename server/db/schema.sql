@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS clinics (
   city VARCHAR(100),
   state VARCHAR(100),
   country VARCHAR(100) DEFAULT 'Bangladesh',
+  timezone VARCHAR(100) NOT NULL DEFAULT 'UTC',
   postal_code VARCHAR(20),
   latitude DECIMAL(10, 8),
   longitude DECIMAL(11, 8),
@@ -155,6 +156,24 @@ CREATE TABLE IF NOT EXISTS patients (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
+-- PATIENT ACCOUNT PROFILE (clinic-independent)
+-- ============================================
+CREATE TABLE IF NOT EXISTS patient_profiles (
+  user_id VARCHAR(36) PRIMARY KEY,
+  date_of_birth DATE,
+  gender VARCHAR(10) CHECK (gender IN ('male', 'female', 'other')),
+  address TEXT,
+  blood_group VARCHAR(5),
+  allergies TEXT,
+  chronic_conditions TEXT,
+  emergency_contact_name VARCHAR(255),
+  emergency_contact_phone VARCHAR(20),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
 -- APPOINTMENTS
 -- ============================================
 CREATE TABLE IF NOT EXISTS appointments (
@@ -170,6 +189,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   type VARCHAR(20) DEFAULT 'in-person' CHECK (type IN ('in-person', 'video', 'phone')),
   notes TEXT,
   cancellation_reason TEXT,
+  reminder_sent_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
@@ -246,7 +266,10 @@ CREATE TABLE IF NOT EXISTS medical_reports (
   patient_id VARCHAR(36) NOT NULL,
   clinic_id VARCHAR(36) NOT NULL,
   doctor_id VARCHAR(36),
+  uploaded_by VARCHAR(36) NOT NULL,
+  title VARCHAR(255) NOT NULL,
   report_type VARCHAR(100) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
   file_url TEXT NOT NULL,
   description TEXT,
   report_date DATE DEFAULT (CURRENT_DATE),
@@ -254,6 +277,7 @@ CREATE TABLE IF NOT EXISTS medical_reports (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
   FOREIGN KEY (clinic_id) REFERENCES clinics(id) ON DELETE CASCADE,
   FOREIGN KEY (doctor_id) REFERENCES users(id)
+  ,FOREIGN KEY (uploaded_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
@@ -273,6 +297,8 @@ CREATE TABLE IF NOT EXISTS payments (
   payment_status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'completed', 'failed', 'refunded')),
   transaction_id VARCHAR(255),
   payment_date DATETIME,
+  receipt_number VARCHAR(80) UNIQUE,
+  receipt_generated_at DATETIME,
   notes TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -401,9 +427,11 @@ CREATE INDEX idx_appointments_patient ON appointments(patient_id);
 CREATE INDEX idx_appointments_doctor ON appointments(doctor_id);
 CREATE INDEX idx_appointments_date ON appointments(appointment_date);
 CREATE INDEX idx_appointments_slot_conflict ON appointments(clinic_id, doctor_id, appointment_date, status, start_time, end_time);
+CREATE INDEX idx_appointments_reminders ON appointments(reminder_sent_at, appointment_date, start_time, status);
 CREATE INDEX idx_medical_records_patient ON medical_records(patient_id);
 CREATE INDEX idx_medical_records_clinic ON medical_records(clinic_id);
 CREATE INDEX idx_medical_records_confidential ON medical_records(clinic_id, patient_id, is_confidential);
+CREATE INDEX idx_medical_reports_patient ON medical_reports(patient_id, report_date);
 CREATE INDEX idx_prescriptions_patient ON prescriptions(patient_id);
 CREATE INDEX idx_prescriptions_clinic ON prescriptions(clinic_id);
 CREATE INDEX idx_payments_clinic ON payments(clinic_id);

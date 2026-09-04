@@ -5,6 +5,9 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const { errorHandler } = require('./middleware/errorHandler');
+const fs = require('fs');
+const https = require('https');
+const { buildCorsOptions, createHttpsMiddleware, getJwtConfig, getTrustProxy, validateHttpsDeployment } = require('./config/security');
 
 const authRoutes = require('./routes/authRoutes');
 const clinicRoutes = require('./routes/clinicRoutes');
@@ -20,38 +23,24 @@ const messageRoutes = require('./routes/messageRoutes');
 const medicalReportRoutes = require('./routes/medicalReportRoutes');
 const doctorRoutes = require('./routes/doctorRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const internalRoutes = require('./routes/internalRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Fail fast before accepting traffic when authentication configuration is unsafe.
+getJwtConfig();
+
+const trustProxy = getTrustProxy();
+if (trustProxy) app.set('trust proxy', trustProxy);
+const httpsConfig = validateHttpsDeployment();
+
 // Security
-app.use(helmet());
+app.use(helmet({ hsts: false }));
+app.use(createHttpsMiddleware(httpsConfig));
 
-// Dynamic CORS configuration (supports localhost, custom domain, and Vercel preview URLs)
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://localhost:5000',
-].filter(Boolean);
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, curl, serverless same-origin)
-      if (!origin) return callback(null, true);
-      if (
-        allowedOrigins.includes(origin) ||
-        (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost:')) ||
-        /\.vercel\.app$/.test(origin)
-      ) {
-        return callback(null, true);
-      }
-      return callback(null, true);
-    },
-    credentials: true,
-  })
-);
+// Explicit CORS allowlist; production preview/custom origins must be configured.
+app.use(cors(buildCorsOptions()));
 
 // Rate limiting
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
@@ -88,6 +77,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/doctors', doctorRoutes);
+app.use('/api/internal', internalRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -100,10 +90,15 @@ app.use(errorHandler);
 // Start server (only if not in test mode and not in Vercel serverless environment)
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   const startServer = (port) => {
-    const server = app.listen(port, '0.0.0.0', () => {
-      console.log(`ClinicOS server running on http://localhost:${port}`);
-      console.log(`Health check: http://localhost:${port}/api/health`);
-    });
+    const directTls = process.env.TLS_CERT_PATH && process.env.TLS_KEY_PATH;
+    const server = directTls
+      ? https.createServer({
+          cert: fs.readFileSync(process.env.TLS_CERT_PATH),
+          key: fs.readFileSync(process.env.TLS_KEY_PATH),
+        }, app).listen(port, '0.0.0.0')
+      : app.listen(port, '0.0.0.0');
+
+    server.on('listening', () => console.log(`ClinicOS server listening on port ${port}${directTls ? ' with TLS' : ''}`));
 
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
@@ -111,12 +106,21 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
         console.warn(`Port ${port} is currently in use. Trying port ${nextPort}...`);
         startServer(nextPort);
       } else {
-        console.error('Server error:', err);
+        console.error('Server error:', err.message);
       }
     });
+
+    const shutdown = (signal) => {
+      console.log(`${signal} received; shutting down gracefully.`);
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(1), 10000).unref();
+    };
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+    process.once('SIGINT', () => shutdown('SIGINT'));
   };
 
   startServer(PORT);
+  require('./services/appointmentReminderService').startAppointmentReminderWorker();
 }
 
 module.exports = app;

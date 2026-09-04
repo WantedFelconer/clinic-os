@@ -12,6 +12,7 @@ export const authApi = {
   getPatientProfile: () => apiClient.get('/auth/patient-profile'),
   getMyAppointments: (page = 1) => apiClient.get(`/auth/appointments?page=${page}`),
   getMedicalRecords: (page = 1) => apiClient.get(`/auth/medical-records?page=${page}`),
+  getMedicalReports: (page = 1) => apiClient.get(`/auth/medical-reports?page=${page}`),
   getPrescriptions: (page = 1) => apiClient.get(`/auth/prescriptions?page=${page}`),
   getMyPayments: (page = 1) => apiClient.get(`/auth/payments?page=${page}`),
   getNotifications: (page = 1) => apiClient.get(`/auth/notifications?page=${page}`),

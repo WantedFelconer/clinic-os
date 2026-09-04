@@ -31,7 +31,7 @@ const medicalRecordController = {
         action: 'EMR_CREATED',
         entity_type: 'medical_record',
         entity_id: record.id,
-        details: { clinic_id: clinicId, patient_id: patient.id, diagnosis: record.diagnosis },
+        details: { clinic_id: clinicId, patient_id: patient.id, record_id: record.id, doctor_id: req.user.id },
         ip_address: req.ip,
       });
 
@@ -137,7 +137,7 @@ const medicalRecordController = {
         action: 'EMR_UPDATED',
         entity_type: 'medical_record',
         entity_id: req.params.id,
-        details: { clinic_id: clinicId, patient_id: existing.patient_id, updates: req.body },
+        details: { clinic_id: clinicId, patient_id: existing.patient_id, record_id: req.params.id, doctor_id: req.user.id },
         ip_address: req.ip,
       });
 

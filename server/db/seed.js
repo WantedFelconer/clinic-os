@@ -845,10 +845,10 @@ async function seed() {
       const rptId = `rep-seed-${String(rptIdx).padStart(3, '0')}`;
       const rptDate = formatDate(subMonths(now, rptIdx % 4));
       await query(
-        `INSERT INTO medical_reports (id, patient_id, clinic_id, doctor_id, report_type, file_url, description, report_date)
-         VALUES (?, ?, 'c-clinic-001', ?, ?, 'https://storage.googleapis.com/clinic-os-public/reports/sample-report.pdf', ?, ?)
+        `INSERT INTO medical_reports (id, patient_id, clinic_id, doctor_id, uploaded_by, title, report_type, file_name, file_url, description, report_date)
+         VALUES (?, ?, 'c-clinic-001', ?, ?, ?, ?, 'sample-report.pdf', 'https://storage.googleapis.com/clinic-os-public/reports/sample-report.pdf', ?, ?)
          ON DUPLICATE KEY UPDATE description = VALUES(description)`,
-        [rptId, r.patientId, r.docId, r.type, r.desc, rptDate]
+        [rptId, r.patientId, r.docId, r.docId, r.type, r.type, r.desc, rptDate]
       );
     }
 
@@ -942,7 +942,7 @@ async function seed() {
     const auditLogs = [
       { userId: 'u-doctor-001', action: 'DOCTOR_LOGIN', entity: 'User', id: 'u-doctor-001', ip: '103.205.71.12', details: { role: 'doctor', browser: 'Chrome 128' } },
       { userId: 'u-doctor-001', action: 'APPOINTMENT_CREATE', entity: 'Appointment', id: 'a-seed-0001', ip: '103.205.71.12', details: { patient: 'Fatima Begum', type: 'in-person' } },
-      { userId: 'u-doctor-001', action: 'PRESCRIPTION_CREATE', entity: 'Prescription', id: 'rx-seed-0001', ip: '103.205.71.12', details: { items: 2, diagnosis: 'Stage 1 Hypertension' } },
+      { userId: 'u-doctor-001', action: 'PRESCRIPTION_CREATE', entity: 'Prescription', id: 'rx-seed-0001', ip: '103.205.71.12', details: { items: 2, patient_id: 'p-patient-001' } },
       { userId: 'u-assistant-001', action: 'PAYMENT_RECEIVE', entity: 'Payment', id: 'pay-seed-0001', ip: '103.205.71.14', details: { amount: 1000, method: 'mobile_banking' } },
       { userId: 'u-admin-001', action: 'ADMIN_PLAN_UPDATE', entity: 'SubscriptionPlan', id: 'plan-pro', ip: '192.168.1.1', details: { price: 79, active: true } },
       { userId: 'u-patient-001', action: 'PATIENT_PORTAL_LOGIN', entity: 'User', id: 'u-patient-001', ip: '202.4.96.3', details: { browser: 'Safari Mobile' } },

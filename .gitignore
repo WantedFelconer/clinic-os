@@ -9,6 +9,10 @@ client/dist/
 build/
 .output/
 
+# This repository currently versions the deployable client bundle.
+!client/dist/
+!client/dist/**
+
 # Vercel deployment artifacts
 .vercel/
 

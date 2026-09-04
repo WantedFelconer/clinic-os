@@ -1,14 +1,15 @@
 const db = require('../config/database');
 const { generateSlug, generateUUID } = require('../utils/helpers');
+const { isValidDateOnly, localClock } = require('../utils/dateTime');
 
 const Clinic = {
-  async create({ owner_id, name, description, phone, email, address, city, state, country, logo_url, banner_url }) {
+  async create({ owner_id, name, description, phone, email, address, city, state, country, timezone, logo_url, banner_url }) {
     const slug = generateSlug(name);
     const id = generateUUID();
     await db.execute(
-      `INSERT INTO clinics (id, owner_id, name, slug, description, phone, email, address, city, state, country, logo_url, banner_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, owner_id ?? null, name ?? null, slug, description ?? null, phone ?? null, email ?? null, address ?? null, city ?? null, state ?? null, country ?? null, logo_url ?? null, banner_url ?? null]
+      `INSERT INTO clinics (id, owner_id, name, slug, description, phone, email, address, city, state, country, timezone, logo_url, banner_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, owner_id ?? null, name ?? null, slug, description ?? null, phone ?? null, email ?? null, address ?? null, city ?? null, state ?? null, country ?? null, timezone || 'UTC', logo_url ?? null, banner_url ?? null]
     );
     return this.findById(id);
   },
@@ -22,12 +23,20 @@ const Clinic = {
     return rows[0];
   },
 
-  async findByOwner(ownerId) {
+  async findAccessibleByUser(userId) {
     const [rows] = await db.execute(
-      'SELECT * FROM clinics WHERE owner_id = ? ORDER BY created_at DESC',
-      [ownerId]
+      `SELECT DISTINCT c.*, CASE WHEN c.owner_id = ? THEN 'owner' ELSE cs.role END AS access_role
+       FROM clinics c
+       LEFT JOIN clinic_staff cs ON cs.clinic_id = c.id AND cs.user_id = ? AND cs.is_active = 1
+       WHERE c.owner_id = ? OR cs.id IS NOT NULL
+       ORDER BY c.is_active DESC, c.name ASC`,
+      [userId, userId, userId]
     );
     return rows;
+  },
+
+  async findByOwner(ownerId) {
+    return this.findAccessibleByUser(ownerId);
   },
 
   async findBySlug(slug) {
@@ -40,7 +49,7 @@ const Clinic = {
   },
 
   async update(id, fields) {
-    const allowedFields = ['name', 'description', 'phone', 'email', 'address', 'city', 'state', 'country', 'postal_code', 'latitude', 'longitude', 'website', 'logo_url', 'banner_url', 'is_active'];
+    const allowedFields = ['name', 'description', 'phone', 'email', 'address', 'city', 'state', 'country', 'timezone', 'postal_code', 'latitude', 'longitude', 'website', 'logo_url', 'banner_url', 'is_active'];
     const updates = [];
     const values = [];
 
@@ -64,7 +73,13 @@ const Clinic = {
 
   async search({ query, city, specialization, page = 1, limit = 20 }) {
     const offset = (page - 1) * limit;
-    let sql = `SELECT c.*, u.first_name as doctor_first_name, u.last_name as doctor_last_name,
+    let sql = `SELECT c.id, c.name, c.slug, c.description, c.address, c.city, c.state, c.country,
+                      c.postal_code, c.latitude, c.longitude, c.phone, c.email, c.website,
+                      c.logo_url, c.banner_url, c.owner_id as primary_doctor_id, u.first_name as doctor_first_name, u.last_name as doctor_last_name,
+                      (SELECT GROUP_CONCAT(DISTINCT dp.specialization SEPARATOR ', ')
+                       FROM doctor_profiles dp
+                       LEFT JOIN clinic_staff cs2 ON cs2.user_id = dp.user_id AND cs2.clinic_id = c.id AND cs2.is_active = 1
+                       WHERE dp.specialization IS NOT NULL AND (dp.user_id = c.owner_id OR cs2.id IS NOT NULL)) as specializations,
                       (SELECT IFNULL(AVG(rating), 0) FROM reviews r WHERE r.clinic_id = c.id AND r.is_approved = true) as avg_rating,
                       (SELECT COUNT(*) FROM reviews r WHERE r.clinic_id = c.id AND r.is_approved = true) as reviews_count
                FROM clinics c JOIN users u ON c.owner_id = u.id WHERE c.is_active = true`;
@@ -89,8 +104,14 @@ const Clinic = {
     }
 
     if (specialization && specialization !== 'All') {
-      sql += ' AND (c.description LIKE ? OR c.name LIKE ?)';
-      countSql += ' AND (c.description LIKE ? OR c.name LIKE ?)';
+      const specializationClause = ` AND (
+        EXISTS (SELECT 1 FROM doctor_profiles dp
+                LEFT JOIN clinic_staff cs2 ON cs2.user_id = dp.user_id AND cs2.clinic_id = c.id AND cs2.is_active = 1
+                WHERE (dp.user_id = c.owner_id OR cs2.id IS NOT NULL) AND dp.specialization LIKE ?)
+        OR EXISTS (SELECT 1 FROM clinic_services svc WHERE svc.clinic_id = c.id AND svc.is_active = 1 AND svc.name LIKE ?)
+      )`;
+      sql += specializationClause;
+      countSql += specializationClause;
       const like = `%${specialization}%`;
       params.push(like, like);
       countParams.push(like, like);
@@ -105,8 +126,11 @@ const Clinic = {
     return { clinics: rows, total: parseInt(countRows[0].count, 10), page, limit };
   },
 
-  async getAvailableSlots(clinicId, dateStr, serviceId) {
+  async getAvailableSlots(clinicId, dateStr, serviceId, doctorId, requireConfiguredSchedule = false, timeZone = 'UTC') {
     if (!dateStr) return { available: false, message: 'Date is required.', slots: [] };
+    if (!isValidDateOnly(dateStr)) return { available: false, message: 'Date must be a real date in YYYY-MM-DD format.', slots: [] };
+    const currentClock = localClock(new Date(), timeZone);
+    if (dateStr < currentClock.date) return { available: false, message: 'Past appointment dates are unavailable.', slots: [] };
 
     // 1. Determine day of week
     const [y, m, d] = dateStr.split('-').map(Number);
@@ -121,6 +145,7 @@ const Clinic = {
 
     let schedule = schedules[0];
     if (!schedule) {
+      if (requireConfiguredSchedule) return { available: false, message: 'No operating schedule is configured for this date.', slots: [] };
       if (dayOfWeek === 0) {
         return { available: false, message: 'Clinic is closed on Sundays.', slots: [] };
       }
@@ -135,8 +160,8 @@ const Clinic = {
     let durationMinutes = 30;
     if (serviceId) {
       const [serviceRows] = await db.execute(
-        'SELECT duration_minutes FROM clinic_services WHERE id = ?',
-        [serviceId]
+        'SELECT duration_minutes FROM clinic_services WHERE id = ? AND clinic_id = ? AND is_active = 1',
+        [serviceId, clinicId]
       );
       if (serviceRows[0]?.duration_minutes) {
         durationMinutes = parseInt(serviceRows[0].duration_minutes, 10);
@@ -144,11 +169,14 @@ const Clinic = {
     }
 
     // 4. Fetch existing active appointments for date
-    const [appts] = await db.execute(
-      `SELECT start_time, end_time FROM appointments 
-       WHERE clinic_id = ? AND appointment_date = ? AND status NOT IN ('cancelled', 'rejected')`,
-      [clinicId, dateStr]
-    );
+    let appointmentSql = `SELECT start_time, end_time FROM appointments
+       WHERE clinic_id = ? AND appointment_date = ? AND status NOT IN ('cancelled', 'no_show')`;
+    const appointmentParams = [clinicId, dateStr];
+    if (doctorId) {
+      appointmentSql += ' AND doctor_id = ?';
+      appointmentParams.push(doctorId);
+    }
+    const [appts] = await db.execute(appointmentSql, appointmentParams);
 
     // 5. Generate slots
     const startParts = schedule.start_time.split(':').map(Number);
@@ -173,10 +201,12 @@ const Clinic = {
         return aStart < endTimeStr && aEnd > startTimeStr;
       });
 
+      const currentMinutes = Number(currentClock.time.slice(0, 2)) * 60 + Number(currentClock.time.slice(3, 5));
+      const isPastToday = dateStr === currentClock.date && cur <= currentMinutes;
       slots.push({
         start_time: `${slotStartH}:${slotStartM}`,
         end_time: `${slotEndH}:${slotEndM}`,
-        available: !isBooked,
+        available: !isBooked && !isPastToday,
       });
     }
 
@@ -197,6 +227,19 @@ const Clinic = {
     return rows;
   },
 
+  async getPublicDoctors(clinicId) {
+    const [rows] = await db.execute(
+      `SELECT u.id as doctor_id, u.first_name, u.last_name, u.avatar_url,
+              dp.qualifications, dp.specialization, dp.experience_years, dp.consultation_fee, dp.bio
+       FROM clinic_staff cs
+       JOIN users u ON cs.user_id = u.id
+       LEFT JOIN doctor_profiles dp ON dp.user_id = u.id
+       WHERE cs.clinic_id = ? AND cs.role = 'doctor' AND cs.is_active = 1 AND u.is_active = 1`,
+      [clinicId]
+    );
+    return rows;
+  },
+
   async getSchedules(clinicId) {
     const [rows] = await db.execute(
       'SELECT * FROM clinic_schedules WHERE clinic_id = ? ORDER BY day_of_week',
@@ -206,14 +249,15 @@ const Clinic = {
   },
 
   async updateSchedules(clinicId, schedules) {
-    await db.execute('DELETE FROM clinic_schedules WHERE clinic_id = ?', [clinicId]);
-    for (const s of schedules) {
-      const scheduleId = generateUUID();
-      await db.execute(
-        'INSERT INTO clinic_schedules (id, clinic_id, day_of_week, start_time, end_time, is_available) VALUES (?, ?, ?, ?, ?, ?)',
-        [scheduleId, clinicId, s.day_of_week, s.start_time, s.end_time, s.is_available ? 1 : 0]
-      );
-    }
+    await db.transaction(async (connection) => {
+      await connection.execute('DELETE FROM clinic_schedules WHERE clinic_id = ?', [clinicId]);
+      for (const s of schedules) {
+        await connection.execute(
+          'INSERT INTO clinic_schedules (id, clinic_id, day_of_week, start_time, end_time, is_available) VALUES (?, ?, ?, ?, ?, ?)',
+          [generateUUID(), clinicId, s.day_of_week, s.start_time, s.end_time, s.is_available ? 1 : 0]
+        );
+      }
+    });
     return this.getSchedules(clinicId);
   },
 

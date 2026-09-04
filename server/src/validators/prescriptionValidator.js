@@ -15,24 +15,24 @@ const prescriptionValidator = {
       .optional()
       .trim(),
     body('items')
-      .optional()
-      .isArray()
-      .withMessage('Prescription items must be an array'),
+      .isArray({ min: 1, max: 50 })
+      .withMessage('At least one and at most 50 prescription items are required'),
     body('items.*.medication_name')
-      .optional()
       .trim()
       .notEmpty()
-      .withMessage('Medication name cannot be empty when items are provided'),
+      .withMessage('Medication name is required')
+      .isLength({ max: 255 }),
     body('items.*.dosage')
-      .optional()
       .trim()
       .notEmpty()
-      .withMessage('Dosage cannot be empty'),
+      .withMessage('Dosage is required')
+      .isLength({ max: 100 }),
     body('items.*.frequency')
-      .optional()
       .trim()
       .notEmpty()
-      .withMessage('Frequency cannot be empty'),
+      .withMessage('Frequency is required')
+      .isLength({ max: 100 }),
+    body('appointment_id').optional({ checkFalsy: true }).matches(/^[A-Za-z0-9-]{1,36}$/),
   ]),
 
   addItem: validate([

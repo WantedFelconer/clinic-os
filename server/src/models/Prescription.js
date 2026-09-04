@@ -12,14 +12,53 @@ const Prescription = {
     return this.findById(id);
   },
 
+  async createWithItems({ patient_id, clinic_id, doctor_id, appointment_id, diagnosis, notes, items }) {
+    const prescriptionId = generateUUID();
+    await db.transaction(async (connection) => {
+      await connection.execute(
+        `INSERT INTO prescriptions (id, patient_id, clinic_id, doctor_id, appointment_id, diagnosis, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [prescriptionId, patient_id, clinic_id, doctor_id, appointment_id || null, diagnosis, notes || null]
+      );
+      for (const item of items) {
+        await connection.execute(
+          `INSERT INTO prescription_items (id, prescription_id, medication_name, dosage, frequency, duration, route, instructions)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [generateUUID(), prescriptionId, item.medication_name.trim(), item.dosage.trim(), item.frequency.trim(), item.duration?.trim() || null, item.route?.trim() || 'Oral', item.instructions?.trim() || null]
+        );
+      }
+    });
+    return this.getFullPrescription(prescriptionId);
+  },
+
+  async updateWithItems(id, { diagnosis, notes, items }) {
+    await db.transaction(async (connection) => {
+      await connection.execute(
+        'UPDATE prescriptions SET diagnosis = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [diagnosis, notes || null, id]
+      );
+      await connection.execute('DELETE FROM prescription_items WHERE prescription_id = ?', [id]);
+      for (const item of items) {
+        await connection.execute(
+          `INSERT INTO prescription_items (id, prescription_id, medication_name, dosage, frequency, duration, route, instructions)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [generateUUID(), id, item.medication_name.trim(), item.dosage.trim(), item.frequency.trim(), item.duration?.trim() || null, item.route?.trim() || 'Oral', item.instructions?.trim() || null]
+        );
+      }
+    });
+    return this.getFullPrescription(id);
+  },
+
   async findById(id) {
     const [rows] = await db.execute(
       `SELECT p.*, pt.first_name as patient_first_name, pt.last_name as patient_last_name,
               u.first_name as doctor_first_name, u.last_name as doctor_last_name,
-              c.name as clinic_name
+              dp.qualifications as doctor_qualifications,
+              c.name as clinic_name, c.phone as clinic_phone, c.email as clinic_email, c.address as clinic_address
        FROM prescriptions p
        JOIN patients pt ON p.patient_id = pt.id
        LEFT JOIN users u ON p.doctor_id = u.id
+       LEFT JOIN doctor_profiles dp ON dp.user_id = p.doctor_id
        LEFT JOIN clinics c ON p.clinic_id = c.id
        WHERE p.id = ?`,
       [id]
@@ -89,7 +128,7 @@ const Prescription = {
     await db.execute(
       `INSERT INTO prescription_items (id, prescription_id, medication_name, dosage, frequency, duration, route, instructions)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, prescription_id ?? null, medication_name ?? null, dosage || '1 tablet', frequency || 'Once daily', duration || '7 days', route || 'Oral', instructions ?? null]
+      [id, prescription_id ?? null, medication_name ?? null, dosage, frequency, duration || null, route || 'Oral', instructions ?? null]
     );
     const [rows] = await db.execute('SELECT * FROM prescription_items WHERE id = ?', [id]);
     return rows[0];
@@ -103,8 +142,9 @@ const Prescription = {
     return rows;
   },
 
-  async removeItem(itemId) {
-    await db.execute('DELETE FROM prescription_items WHERE id = ?', [itemId]);
+  async removeItem(itemId, prescriptionId) {
+    const [result] = await db.execute('DELETE FROM prescription_items WHERE id = ? AND prescription_id = ?', [itemId, prescriptionId]);
+    return result.affectedRows > 0;
   },
 
   async getFullPrescription(id) {

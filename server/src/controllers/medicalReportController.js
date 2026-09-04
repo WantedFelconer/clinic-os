@@ -6,7 +6,7 @@ const medicalReportController = {
   async create(req, res, next) {
     try {
       const clinicId = req.params.clinicId;
-      const { report_type, file_url, description, report_date } = req.body;
+      const { title, report_type, file_name, file_url, description, report_date } = req.body;
 
       if (!report_type || !file_url) {
         return res.status(400).json({ message: 'Report type and file URL are required.' });
@@ -36,7 +36,10 @@ const medicalReportController = {
         patient_id: patientId,
         clinic_id: clinicId,
         doctor_id: doctorId,
+        uploaded_by: req.user.id,
+        title,
         report_type,
+        file_name,
         file_url,
         description: description || null,
         report_date: report_date || null,

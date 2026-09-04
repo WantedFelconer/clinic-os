@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
+const { getJwtConfig } = require('../config/security');
 
 // Inactivity session tracker (user_id -> last_activity_timestamp_ms)
 // Configurable timeout: default 30 minutes (NFR-9)
@@ -23,8 +24,14 @@ const authenticate = async (req, res, next) => {
       return res.status(401).json({ message: 'Access denied. No token provided.' });
     }
 
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const token = authHeader.slice(7).trim();
+    if (!token) return res.status(401).json({ message: 'Access denied. No token provided.' });
+    const jwtConfig = getJwtConfig();
+    const decoded = jwt.verify(token, jwtConfig.secret, {
+      algorithms: jwtConfig.algorithms,
+      issuer: jwtConfig.issuer,
+      audience: jwtConfig.audience,
+    });
 
     // Inactivity timeout check (NFR-9)
     if (process.env.NODE_ENV !== 'test') {

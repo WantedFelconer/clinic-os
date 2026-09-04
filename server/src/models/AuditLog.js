@@ -1,11 +1,13 @@
 const db = require('../config/database');
 const { generateUUID } = require('../utils/helpers');
+const { sanitizeAuditDetails } = require('../utils/audit');
 
 const AuditLog = {
   async log({ user_id, action, entity_type, entity_id, details, ip_address }) {
     try {
       const id = generateUUID();
-      const safeDetails = details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null;
+      const sanitized = details && typeof details === 'object' ? sanitizeAuditDetails(details) : details;
+      const safeDetails = sanitized ? (typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized)) : null;
       await db.execute(
         `INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details, ip_address)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,

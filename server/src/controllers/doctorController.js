@@ -1,5 +1,6 @@
 const DoctorProfile = require('../models/DoctorProfile');
 const Review = require('../models/Review');
+const { publicDoctor } = require('../serializers/public');
 
 const doctorController = {
   async search(req, res, next) {
@@ -9,9 +10,10 @@ const doctorController = {
       const query = req.query.query || req.query.search || '';
       const specialty = req.query.specialty || req.query.specialization || '';
       const city = req.query.city || '';
+      const availabilityDate = req.query.availability_date || '';
 
-      const result = await DoctorProfile.search({ query, specialty, city, page, limit });
-      res.json(result);
+      const result = await DoctorProfile.search({ query, specialty, city, availabilityDate, page, limit });
+      res.json({ ...result, doctors: result.doctors.map(publicDoctor) });
     } catch (error) {
       next(error);
     }
@@ -23,7 +25,7 @@ const doctorController = {
       if (!doctor) {
         return res.status(404).json({ message: 'Doctor not found' });
       }
-      res.json({ doctor });
+      res.json({ doctor: publicDoctor(doctor) });
     } catch (error) {
       next(error);
     }

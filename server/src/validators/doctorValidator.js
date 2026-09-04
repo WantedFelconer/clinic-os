@@ -1,7 +1,15 @@
-const { body } = require('express-validator');
+const { body, query } = require('express-validator');
 const validate = require('./validate');
 
 const doctorValidator = {
+  search: validate([
+    query('query').optional().trim().isLength({ max: 120 }),
+    query('search').optional().trim().isLength({ max: 120 }),
+    query('specialty').optional().trim().isLength({ max: 120 }),
+    query('specialization').optional().trim().isLength({ max: 120 }),
+    query('city').optional().trim().isLength({ max: 100 }),
+    query('availability_date').optional().isISO8601({ strict: true }).withMessage('Availability date must use YYYY-MM-DD'),
+  ]),
   updateProfile: validate([
     body('specialization')
       .optional()

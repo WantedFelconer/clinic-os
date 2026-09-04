@@ -8,8 +8,10 @@ const MedicalRecord = require('../models/MedicalRecord');
 const Prescription = require('../models/Prescription');
 const Appointment = require('../models/Appointment');
 const Payment = require('../models/Payment');
+const MedicalReport = require('../models/MedicalReport');
 const AuditLog = require('../models/AuditLog');
 const { sendOTP, sendPasswordReset } = require('../utils/email');
+const { getJwtConfig } = require('../config/security');
 
 const OTP_EXPIRATION_MINUTES = parseInt(process.env.OTP_EXPIRATION_MINUTES, 10) || 10;
 const OTP_EXPIRATION_MS = OTP_EXPIRATION_MINUTES * 60 * 1000;
@@ -33,11 +35,11 @@ const getOtpTracker = (email) => {
 };
 
 const generateToken = (user) => {
-  const secret = process.env.JWT_SECRET || 'dev_secret_key_12345';
+  const config = getJwtConfig();
   return jwt.sign(
     { id: user.id, email: user.email, role: user.role },
-    secret,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    config.secret,
+    { expiresIn: config.expiresIn, issuer: config.issuer, audience: config.audience, algorithm: 'HS256' }
   );
 };
 
@@ -395,6 +397,18 @@ const authController = {
       }
 
       const db = require('../config/database');
+      if (req.user.role === 'patient' && Object.keys(patientUpdates).length > 0) {
+        const profileFields = ['date_of_birth', 'gender', 'address', 'blood_group', 'allergies', 'chronic_conditions', 'emergency_contact_name', 'emergency_contact_phone'];
+        const accountProfile = Object.fromEntries(profileFields.filter((field) => patientUpdates[field] !== undefined).map((field) => [field, patientUpdates[field] || null]));
+        if (Object.keys(accountProfile).length > 0) {
+          const columns = Object.keys(accountProfile);
+          await db.execute(
+            `INSERT INTO patient_profiles (user_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+             ON DUPLICATE KEY UPDATE ${columns.map((column) => `${column} = VALUES(${column})`).join(', ')}, updated_at = CURRENT_TIMESTAMP`,
+            [req.user.id, ...columns.map((column) => accountProfile[column])]
+          );
+        }
+      }
       const [existingPatients] = await db.execute(
         'SELECT id FROM patients WHERE user_id = ?',
         [req.user.id]
@@ -511,19 +525,21 @@ const authController = {
          ORDER BY p.created_at DESC`,
         [req.user.id]
       );
-      if (patients.length === 0) {
-        return res.json({
-          patient: {
-            user_id: req.user.id,
-            first_name: req.user.first_name,
-            last_name: req.user.last_name,
-            email: req.user.email,
-            phone: req.user.phone,
-            clinic_name: 'ClinicOS Network',
-          }
-        });
-      }
-      res.json({ patient: patients[0] });
+      const [profiles] = await db.execute('SELECT * FROM patient_profiles WHERE user_id = ?', [req.user.id]);
+      const latestClinicPatient = patients[0] || {};
+      const accountProfile = profiles[0] || {};
+      res.json({ patient: {
+        ...latestClinicPatient,
+        ...accountProfile,
+        id: latestClinicPatient.id,
+        user_id: req.user.id,
+        first_name: req.user.first_name,
+        last_name: req.user.last_name,
+        email: req.user.email,
+        phone: req.user.phone,
+        clinic_name: latestClinicPatient.clinic_name || null,
+        clinic_id: latestClinicPatient.clinic_id,
+      } });
     } catch (error) {
       next(error);
     }
@@ -570,6 +586,13 @@ const authController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  async getMyMedicalReports(req, res, next) {
+    try {
+      const page = parseInt(req.query.page, 10) || 1;
+      res.json(await MedicalReport.findByUserId(req.user.id, page, 50));
+    } catch (error) { next(error); }
   },
 };
 
