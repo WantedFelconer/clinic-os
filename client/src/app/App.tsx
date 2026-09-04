@@ -1881,7 +1881,14 @@ function PatientsView({ selectedClinic }: { selectedClinic?: any }) {
       try {
         const res = await patientsApi.getByClinic(selectedClinic.id, { search, limit: 100 });
         setPatients(res.data?.patients || []);
-      } catch (requestError) { setPatients([]); setError(getApiErrorMessage(requestError, "Unable to load patients.")); } finally {
+      } catch (requestError: any) {
+        if (requestError?.response?.status === 403) {
+          setError("Authorization error: You do not have permission to view patients for this clinic. Please verify you are logged in as a Doctor.");
+        } else {
+          setPatients([]);
+          setError(getApiErrorMessage(requestError, "Unable to load patients."));
+        }
+      } finally {
         setLoading(false);
       }
     } else { setPatients([]); setLoading(false); }
@@ -4645,11 +4652,16 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
       {/* Modals */}
       <BookAppointmentModal
         open={showBookModal}
-        onClose={() => setShowBookModal(false)}
-        clinicId={bookingClinicId || patientProfile?.clinic_id || "0"}
-        doctorId={bookingDoctorId || ""}
+        onClose={() => {
+          setShowBookModal(false);
+          setBookingDoctorId("");
+        }}
+        clinicId={bookingClinicId && bookingClinicId !== "0" ? bookingClinicId : (patientProfile?.clinic_id || "")}
+        doctorId={bookingDoctorId}
         appointmentDate={discoveryDate}
         patientId={patientProfile?.id}
+        isPatient={true}
+        clinicsList={clinics}
         onSuccess={() => {
           loadAllData();
         }}
@@ -6019,6 +6031,17 @@ export default function App() {
     window.addEventListener('auth:expired', expire);
     return () => window.removeEventListener('auth:expired', expire);
   }, []);
+
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "clinic_os_user" || e.key === "clinic_os_token") {
+        const updatedUser = getStoredUser();
+        if (updatedUser?.role !== user?.role) window.location.reload();
+      }
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [user?.role]);
 
   const handleLoginSuccess = useCallback((token: string, userData: any) => {
     setAuthToken(token, userData);

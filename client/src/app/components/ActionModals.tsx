@@ -19,19 +19,26 @@ const localDate = (offsetDays = 0) => {
 
 // ── 1. Book Appointment Modal ──────────────────────────────────────────────────
 export function BookAppointmentModal({
-  open, onClose, clinicId, patientId, doctorId, appointmentDate, onSuccess,
+  open, onClose, clinicId, patientId, doctorId, appointmentDate,
+  isPatient: isPatientProp, clinicsList, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
-  clinicId: string;
+  clinicId?: string;
   patientId?: string;
   doctorId?: string;
   appointmentDate?: string;
+  isPatient?: boolean;
+  clinicsList?: Array<{ id: string; name: string; city?: string }>;
   onSuccess: () => void;
 }) {
-  const authenticatedUser = getStoredUser();
-  const isPatient = authenticatedUser?.role === "patient";
-  const patientName = [authenticatedUser?.first_name, authenticatedUser?.last_name].filter(Boolean).join(" ");
+  const storedUser = getStoredUser();
+  const isPatient = isPatientProp ?? (storedUser?.role === "patient");
+  const patientDisplayName = [storedUser?.first_name, storedUser?.last_name].filter(Boolean).join(" ");
+  const [selectedClinicId, setSelectedClinicId] = useState<string>(
+    clinicId && clinicId !== "0" ? clinicId : ""
+  );
+  const [availableClinics, setAvailableClinics] = useState<any[]>(clinicsList || []);
   const [form, setForm] = useState({
     patient_id: patientId || "",
     doctor_id: doctorId || "",
@@ -52,6 +59,24 @@ export function BookAppointmentModal({
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (clinicId && clinicId !== "0") {
+      setSelectedClinicId(clinicId);
+      setForm(f => ({ ...f, doctor_id: doctorId || "", service_id: "", start_time: "", end_time: "" }));
+    }
+  }, [clinicId, doctorId]);
+
+  useEffect(() => {
+    if (clinicsList) setAvailableClinics(clinicsList);
+  }, [clinicsList]);
+
+  useEffect(() => {
+    if (!open || (selectedClinicId && selectedClinicId !== "0") || availableClinics.length) return;
+    clinicsApi.search({ limit: 50 })
+      .then(res => setAvailableClinics(res.data?.clinics || []))
+      .catch(() => setError("Unable to load clinics. Please try again."));
+  }, [open, selectedClinicId, availableClinics.length]);
+
+  useEffect(() => {
     if (patientId) {
       setForm(f => ({ ...f, patient_id: patientId }));
     }
@@ -62,12 +87,13 @@ export function BookAppointmentModal({
   }, [appointmentDate]);
 
   useEffect(() => {
-    if (open && clinicId && clinicId !== "0") {
+    if (open && selectedClinicId && selectedClinicId !== "0") {
       setLoadingOptions(true);
+      setError("");
       Promise.all([
-        clinicsApi.getServices(clinicId),
-        clinicsApi.getById(clinicId),
-        isPatient ? Promise.resolve(null) : patientsApi.getByClinic(clinicId, { limit: 100 }),
+        clinicsApi.getServices(selectedClinicId),
+        clinicsApi.getById(selectedClinicId),
+        isPatient ? Promise.resolve(null) : patientsApi.getByClinic(selectedClinicId, { limit: 100 }),
       ]).then(([serviceRes, clinicRes, patientRes]) => {
         const availableDoctors = clinicRes?.data?.staff || [];
         setServices(serviceRes?.data?.services || []);
@@ -76,32 +102,35 @@ export function BookAppointmentModal({
         setForm(f => ({
           ...f,
           patient_id: isPatient ? (patientId || "") : (patientId || f.patient_id),
-          doctor_id: doctorId || "",
+          doctor_id: doctorId || f.doctor_id,
           start_time: "",
           end_time: "",
         }));
       }).catch(() => setError("Unable to load doctors and booking options for this clinic."))
         .finally(() => setLoadingOptions(false));
     } else if (open) {
-      setError("Please select a clinic before booking an appointment.");
+      setServices([]);
+      setPatients([]);
+      setDoctors([]);
+      setSlots([]);
     }
-  }, [open, clinicId, doctorId, patientId, isPatient]);
+  }, [open, selectedClinicId, doctorId, patientId, isPatient]);
 
   useEffect(() => {
-    if (!open || !clinicId || clinicId === "0" || !form.doctor_id || !form.appointment_date) {
+    if (!open || !selectedClinicId || selectedClinicId === "0" || !form.doctor_id || !form.appointment_date) {
       setSlots([]);
       return;
     }
     setLoadingSlots(true);
     setSlots([]);
-    clinicsApi.getAvailableSlots(clinicId, {
+    clinicsApi.getAvailableSlots(selectedClinicId, {
       date: form.appointment_date,
       doctor_id: form.doctor_id,
       service_id: form.service_id || undefined,
     }).then(res => setSlots((res.data?.slots || []).filter((slot: any) => slot.available)))
       .catch(err => setError(err.response?.data?.message || "Unable to load available times."))
       .finally(() => setLoadingSlots(false));
-  }, [open, clinicId, form.doctor_id, form.appointment_date, form.service_id]);
+  }, [open, selectedClinicId, form.doctor_id, form.appointment_date, form.service_id]);
 
   if (!open) return null;
 
@@ -111,7 +140,7 @@ export function BookAppointmentModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clinicId || clinicId === "0" || clinicId === "undefined") {
+    if (!selectedClinicId || selectedClinicId === "0" || selectedClinicId === "undefined") {
       setError("Please select a clinic before booking an appointment.");
       return;
     }
@@ -130,7 +159,7 @@ export function BookAppointmentModal({
     setSubmitting(true);
     setError("");
     try {
-      await appointmentsApi.create(clinicId, form);
+      await appointmentsApi.create(selectedClinicId, form);
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -156,10 +185,27 @@ export function BookAppointmentModal({
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
           {error && <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl font-medium flex items-center gap-2"><AlertCircle size={14} className="flex-shrink-0" /> {error}</div>}
 
+          {(!clinicId || clinicId === "0") && <div>
+            <label htmlFor="booking-clinic" className="block text-xs font-semibold text-slate-600 mb-1.5">Clinic *</label>
+            <select
+              id="booking-clinic"
+              value={selectedClinicId}
+              onChange={e => {
+                setSelectedClinicId(e.target.value);
+                setForm(f => ({ ...f, doctor_id: "", service_id: "", start_time: "", end_time: "" }));
+              }}
+              className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              required
+            >
+              <option value="">-- Choose Clinic --</option>
+              {availableClinics.map(clinic => <option key={clinic.id} value={clinic.id}>{clinic.name}{clinic.city ? ` — ${clinic.city}` : ""}</option>)}
+            </select>
+          </div>}
+
           {isPatient ? (
             <div className="rounded-xl border border-teal-100 bg-teal-50 px-4 py-3">
               <p className="text-xs font-semibold text-teal-800 flex items-center gap-1.5"><User size={14} /> Patient</p>
-              <p className="text-sm font-bold text-slate-900">Booking for yourself{patientName ? ` (${patientName})` : ""}</p>
+              <p className="text-sm font-bold text-slate-900">Booking for yourself {patientDisplayName ? `(${patientDisplayName})` : ""}</p>
             </div>
           ) : <div>
             <label htmlFor="booking-patient" className="block text-xs font-semibold text-slate-600 mb-1.5">Patient *</label>
@@ -179,12 +225,12 @@ export function BookAppointmentModal({
 
           <div>
             <label htmlFor="booking-doctor" className="block text-xs font-semibold text-slate-600 mb-1.5">Doctor *</label>
-            <select id="booking-doctor" value={form.doctor_id} disabled={loadingOptions}
+            <select id="booking-doctor" value={form.doctor_id} disabled={!selectedClinicId || selectedClinicId === "0" || loadingOptions}
               onChange={e => setForm(f => ({ ...f, doctor_id: e.target.value, start_time: "", end_time: "" }))}
               className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-slate-50" required>
               <option value="">{loadingOptions ? "Loading doctors..." : "-- Select Doctor --"}</option>
               {doctors.map((doctor: any) => {
-                const id = doctor.doctor_id || doctor.user_id;
+                const id = doctor.doctor_id || doctor.user_id || doctor.id;
                 return <option key={id} value={id}>Dr. {doctor.first_name} {doctor.last_name} — {doctor.specialization || "General Medicine"}</option>;
               })}
             </select>
@@ -270,7 +316,7 @@ export function BookAppointmentModal({
             </button>
             <button
               type="submit"
-              disabled={submitting || loadingOptions || loadingSlots || !form.start_time || !clinicId || clinicId === "0"}
+              disabled={submitting || loadingOptions || loadingSlots || !form.start_time || !selectedClinicId || selectedClinicId === "0"}
               className="px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-colors flex items-center gap-2"
             >
               {submitting ? "Checking Availability..." : "Confirm Booking"}
