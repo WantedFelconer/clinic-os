@@ -1,5 +1,5 @@
-const db = require('../src/config/database');
-const Subscription = require('../src/models/Subscription');
+const db = require('../src/core/config/database');
+const Subscription = require('../src/modules/subscriptions/models/Subscription');
 
 async function testAnalytics() {
   const clinicId = 'c-clinic-001';

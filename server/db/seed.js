@@ -9,7 +9,7 @@
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
-const db = require('../src/config/database');
+const db = require('../src/core/config/database');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 function formatDate(d) {
@@ -55,7 +55,7 @@ async function seed() {
         max_doctors: 1,
         max_patients: 150,
         max_staff: 2,
-        features: JSON.stringify(['Basic Scheduling', 'EMR Notes', 'Digital Prescriptions', 'Patient Portal', 'Email Notifications']),
+        features: JSON.stringify(['Basic Scheduling', 'EMR Notes', 'Digital Prescriptions', 'Patient Portal', 'Email Notifications', 'Secure Messaging']),
       },
       {
         id: 'plan-pro',
@@ -66,7 +66,7 @@ async function seed() {
         max_doctors: 5,
         max_patients: 1500,
         max_staff: 10,
-        features: JSON.stringify(['Advanced EMR', 'Digital Prescriptions', 'Unlimited Consultations', 'Staff Management', 'Financial Analytics', 'Revenue Reports', 'Priority Support', 'SMS & Email Alerts', 'Patient Portal']),
+        features: JSON.stringify(['Advanced EMR', 'Digital Prescriptions', 'Unlimited Consultations', 'Staff Management', 'Financial Analytics', 'Revenue Reports', 'Priority Support', 'SMS & Email Alerts', 'Patient Portal', 'Service Packages', 'Secure Messaging']),
       },
       {
         id: 'plan-enterprise',
@@ -77,7 +77,7 @@ async function seed() {
         max_doctors: 25,
         max_patients: 10000,
         max_staff: 50,
-        features: JSON.stringify(['Advanced EMR', 'Digital Prescriptions', 'Unlimited Consultations', 'Staff Management', 'Financial Analytics', 'Revenue Reports', 'Custom Domain & Branding', 'Dedicated Account Manager', 'HIPAA/GDPR Compliance Tools', 'API Access', '24/7 SLA Support']),
+        features: JSON.stringify(['Advanced EMR', 'Digital Prescriptions', 'Unlimited Consultations', 'Staff Management', 'Financial Analytics', 'Revenue Reports', 'Custom Domain & Branding', 'Dedicated Account Manager', 'HIPAA/GDPR Compliance Tools', 'API Access', '24/7 SLA Support', 'Service Packages', 'Secure Messaging']),
       },
     ];
 

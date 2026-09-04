@@ -11,4 +11,5 @@ export { subscriptionsApi } from './subscriptions';
 export { adminApi } from './admin';
 export { messagesApi } from './messages';
 export { doctorsApi } from './doctors';
+export { notificationsApi } from './notifications';
 export { default as apiClient, getApiErrorMessage } from './client';

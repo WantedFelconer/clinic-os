@@ -3,27 +3,12 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
-const { errorHandler } = require('./middleware/errorHandler');
+const { generalLimiter } = require('./core/middleware/rateLimiters');
+const { errorHandler } = require('./core/middleware/errorHandler');
 const fs = require('fs');
 const https = require('https');
-const { buildCorsOptions, createHttpsMiddleware, getJwtConfig, getTrustProxy, validateHttpsDeployment } = require('./config/security');
-
-const authRoutes = require('./routes/authRoutes');
-const clinicRoutes = require('./routes/clinicRoutes');
-const patientRoutes = require('./routes/patientRoutes');
-const appointmentRoutes = require('./routes/appointmentRoutes');
-const medicalRecordRoutes = require('./routes/medicalRecordRoutes');
-const prescriptionRoutes = require('./routes/prescriptionRoutes');
-const paymentRoutes = require('./routes/paymentRoutes');
-const reviewRoutes = require('./routes/reviewRoutes');
-const subscriptionRoutes = require('./routes/subscriptionRoutes');
-const adminRoutes = require('./routes/adminRoutes');
-const messageRoutes = require('./routes/messageRoutes');
-const medicalReportRoutes = require('./routes/medicalReportRoutes');
-const doctorRoutes = require('./routes/doctorRoutes');
-const notificationRoutes = require('./routes/notificationRoutes');
-const internalRoutes = require('./routes/internalRoutes');
+const { buildCorsOptions, createHttpsMiddleware, getJwtConfig, getTrustProxy, validateHttpsDeployment } = require('./core/config/security');
+const moduleRouter = require('./modules');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -43,9 +28,7 @@ app.use(createHttpsMiddleware(httpsConfig));
 app.use(cors(buildCorsOptions()));
 
 // Rate limiting
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
-app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
-app.use('/api', limiter);
+app.use('/api', generalLimiter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -61,23 +44,8 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/clinics', clinicRoutes);
-app.use('/api/clinics/:clinicId/patients', patientRoutes);
-app.use('/api/clinics/:clinicId/appointments', appointmentRoutes);
-app.use('/api/clinics/:clinicId/medical-records', medicalRecordRoutes);
-app.use('/api/clinics/:clinicId/medical-reports', medicalReportRoutes);
-app.use('/api/clinics/:clinicId/prescriptions', prescriptionRoutes);
-app.use('/api/clinics/:clinicId/payments', paymentRoutes);
-app.use('/api/clinics/:clinicId/reviews', reviewRoutes);
-app.use('/api/clinics/:clinicId/subscriptions', subscriptionRoutes);
-app.use('/api/subscriptions', subscriptionRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/messages', messageRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/doctors', doctorRoutes);
-app.use('/api/internal', internalRoutes);
+// Business routes are composed by the modular-monolith registry.
+app.use('/api', moduleRouter);
 
 // 404 handler
 app.use((req, res) => {
@@ -120,7 +88,7 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   };
 
   startServer(PORT);
-  require('./services/appointmentReminderService').startAppointmentReminderWorker();
+  require('./modules/appointments/services/appointmentReminderService').startAppointmentReminderWorker();
 }
 
 module.exports = app;

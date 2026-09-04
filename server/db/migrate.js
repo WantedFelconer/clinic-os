@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
-const { sanitizeAuditDetails } = require('../src/utils/audit');
+const { sanitizeAuditDetails } = require('../src/core/utils/audit');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 async function migrate() {

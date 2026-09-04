@@ -4,18 +4,18 @@ const http = require('node:http');
 const express = require('express');
 const {
   buildCorsOptions, createHttpsMiddleware, getHttpsConfig, getJwtConfig, getTrustProxy, validateHttpsDeployment,
-} = require('../src/config/security');
-const { sanitizeAuditDetails } = require('../src/utils/audit');
+} = require('../src/core/config/security');
+const { sanitizeAuditDetails } = require('../src/core/utils/audit');
 const { publicClinic, publicDoctor } = require('../src/serializers/public');
-const { ensureAppointmentModificationAllowed } = require('../src/utils/appointments');
-const { createTextPdf } = require('../src/utils/pdf');
-const { normalizeFeatureSet } = require('../src/config/features');
-const { validateDateOfBirth, validateAppointmentClock, localClock } = require('../src/utils/dateTime');
-const db = require('../src/config/database');
-const { clinicAccess } = require('../src/middleware/rbac');
-const messageController = require('../src/controllers/messageController');
-const prescriptionController = require('../src/controllers/prescriptionController');
-const Prescription = require('../src/models/Prescription');
+const { appointmentStart, ensureAppointmentModificationAllowed } = require('../src/core/utils/appointments');
+const { createTextPdf } = require('../src/core/utils/pdf');
+const { normalizeFeatureSet } = require('../src/core/config/features');
+const { validateDateOfBirth, validateAppointmentClock, localClock } = require('../src/core/utils/dateTime');
+const db = require('../src/core/config/database');
+const { clinicAccess } = require('../src/core/middleware/rbac');
+const messageController = require('../src/modules/communications/controllers/messageController');
+const prescriptionController = require('../src/modules/prescriptions/controllers/prescriptionController');
+const Prescription = require('../src/modules/prescriptions/models/Prescription');
 
 function corsDecision(options, origin) {
   return new Promise((resolve) => options.origin(origin, (error, allowed) => resolve({ error, allowed })));
@@ -105,6 +105,11 @@ test('appointment modifications reject now, past, inactive, and terminal appoint
   assert.equal(ensureAppointmentModificationAllowed(future, new Date('2030-01-02T10:00:00Z')).allowed, false);
   assert.equal(ensureAppointmentModificationAllowed({ ...future, status: 'completed' }, new Date('2030-01-01')).allowed, false);
   assert.equal(ensureAppointmentModificationAllowed({ ...future, clinic_is_active: 0 }, new Date('2030-01-01')).allowed, false);
+});
+
+test('appointment start normalizes database dates, ISO strings, and single-digit hours', () => {
+  assert.deepEqual(appointmentStart({ appointment_date: new Date(2030, 0, 2), start_time: '9:05:00' }), { date: '2030-01-02', time: '09:05' });
+  assert.deepEqual(appointmentStart({ appointment_date: '2030-01-03T00:00:00.000Z', start_time: '10:15' }), { date: '2030-01-03', time: '10:15' });
 });
 
 test('feature normalization is exact and does not grant unrelated features', () => {

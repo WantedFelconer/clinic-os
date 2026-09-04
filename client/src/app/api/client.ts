@@ -15,6 +15,9 @@ export interface ApiErrorResponse {
 export function getApiErrorMessage(error: unknown, defaultMessage = 'An unexpected error occurred. Please try again.'): string {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as ApiErrorResponse | undefined;
+    if (error.response?.status === 429) {
+      return data?.message || 'Too many requests. Please slow down and wait a few moments before trying again.';
+    }
     if (data?.message) {
       return data.message;
     }

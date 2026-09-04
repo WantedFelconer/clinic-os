@@ -1,0 +1,18 @@
+const router = require('express').Router({ mergeParams: true });
+const paymentController = require('../controllers/paymentController');
+const { authenticate } = require('../../../core/middleware/auth');
+const { authorize, clinicAccess } = require('../../../core/middleware/rbac');
+const paymentValidator = require('../validators/paymentValidator');
+const { paginationValidator } = require('../../../core/validators');
+const { requireFeature } = require('../../../core/middleware/subscription');
+
+router.get('/', authenticate, authorize('doctor', 'assistant', 'admin'), clinicAccess, paginationValidator, paymentController.getByClinic);
+router.post('/', authenticate, authorize('doctor', 'assistant'), clinicAccess, paymentValidator.create, paymentController.create);
+router.get('/my', authenticate, authorize('patient'), paginationValidator, paymentController.getMyPayments);
+router.get('/revenue', authenticate, authorize('doctor', 'assistant', 'admin'), clinicAccess, requireFeature('financial_reports'), paymentController.getRevenue);
+router.get('/:id', authenticate, clinicAccess, paymentController.getById);
+router.get('/:id/receipt', authenticate, clinicAccess, paymentController.downloadReceipt);
+router.put('/:id', authenticate, clinicAccess, paymentValidator.updateStatus, paymentController.updateStatus);
+router.put('/:id/status', authenticate, clinicAccess, paymentValidator.updateStatus, paymentController.updateStatus);
+
+module.exports = router;
