@@ -7,6 +7,9 @@ const Appointment = {
   },
 
   async createTransactional({ clinic_id, patient_id, doctor_id, service_id, appointment_date, start_time, end_time, type, notes }) {
+    const normalizedServiceId = (service_id && String(service_id).trim() !== '')
+      ? String(service_id).trim()
+      : null;
     return db.transaction(async (conn) => {
       // Lock conflicting rows for this doctor and date to eliminate race conditions
       if (doctor_id) {
@@ -32,7 +35,7 @@ const Appointment = {
       await conn.execute(
         `INSERT INTO appointments (id, clinic_id, patient_id, doctor_id, service_id, appointment_date, start_time, end_time, type, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, clinic_id ?? null, patient_id ?? null, doctor_id ?? null, service_id ?? null, appointment_date ?? null, start_time ?? null, end_time ?? null, type ?? null, notes ?? null]
+        [id, clinic_id ?? null, patient_id ?? null, doctor_id ?? null, normalizedServiceId, appointment_date ?? null, start_time ?? null, end_time ?? null, type ?? null, notes ?? null]
       );
 
       const [rows] = await conn.execute(
@@ -182,7 +185,10 @@ const Appointment = {
     for (const [key, value] of Object.entries(fields)) {
       if (allowedFields.includes(key)) {
         updates.push(`${key} = ?`);
-        values.push(value ?? null);
+        const normalizedValue = key === 'service_id' && (!value || String(value).trim() === '')
+          ? null
+          : (value ?? null);
+        values.push(normalizedValue);
       }
     }
 

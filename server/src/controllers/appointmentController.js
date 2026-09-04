@@ -88,6 +88,9 @@ const appointmentController = {
       const clinicId = req.params.clinicId;
       const clinic = req.clinic?.id ? req.clinic : await Clinic.findById(clinicId);
       let doctorId = req.body.doctor_id;
+      const serviceId = (req.body.service_id && String(req.body.service_id).trim() !== '')
+        ? String(req.body.service_id).trim()
+        : null;
 
       // 1. Doctor verification
       if (!doctorId) {
@@ -99,8 +102,8 @@ const appointmentController = {
       }
 
       // 2. Service verification
-      if (req.body.service_id) {
-        const service = await Service.findById(req.body.service_id);
+      if (serviceId) {
+        const service = await Service.findById(serviceId);
         if (!service || service.clinic_id !== clinicId || !service.is_active) {
           return res.status(400).json({ message: 'Selected service is invalid or not offered by this clinic.' });
         }
@@ -140,7 +143,7 @@ const appointmentController = {
       const validation = await validateScheduleAndConflict({
         clinic_id: clinicId,
         doctor_id: doctorId,
-        service_id: req.body.service_id,
+        service_id: serviceId,
         appointment_date: req.body.appointment_date,
         start_time: req.body.start_time,
         end_time: req.body.end_time,
@@ -163,6 +166,7 @@ const appointmentController = {
       // 5. Transaction-safe appointment creation with locking
       const appointment = await Appointment.createTransactional({
         ...req.body,
+        service_id: serviceId,
         patient_id: patientId,
         type,
         clinic_id: clinicId,

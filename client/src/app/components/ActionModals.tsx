@@ -159,7 +159,10 @@ export function BookAppointmentModal({
     setSubmitting(true);
     setError("");
     try {
-      await appointmentsApi.create(selectedClinicId, form);
+      await appointmentsApi.create(selectedClinicId, {
+        ...form,
+        service_id: form.service_id && form.service_id.trim() !== "" ? form.service_id.trim() : undefined,
+      });
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -231,7 +234,9 @@ export function BookAppointmentModal({
               <option value="">{loadingOptions ? "Loading doctors..." : "-- Select Doctor --"}</option>
               {doctors.map((doctor: any) => {
                 const id = doctor.doctor_id || doctor.user_id || doctor.id;
-                return <option key={id} value={id}>Dr. {doctor.first_name} {doctor.last_name} — {doctor.specialization || "General Medicine"}</option>;
+                const hasDrPrefix = (doctor.first_name || "").trim().toLowerCase().startsWith("dr");
+                const prefix = hasDrPrefix ? "" : "Dr. ";
+                return <option key={id} value={id}>{prefix}{doctor.first_name} {doctor.last_name} — {doctor.specialization || "General Medicine"}</option>;
               })}
             </select>
           </div>
