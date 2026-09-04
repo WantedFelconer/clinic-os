@@ -11,6 +11,8 @@ import {
   AddPatientModal, CreateInvoiceModal, PayInvoiceModal, SubmitReviewModal,
   SendMessageModal, AddStaffModal, UploadMedicalReportModal,
 } from "./components/ActionModals";
+import { PrescriptionDocument } from "./components/PrescriptionDocument";
+import { generatePrescriptionPdf } from "./utils/prescriptionPdf";
 import {
   LayoutDashboard, Calendar, Users, FileText, Pill, BarChart3,
   Settings, Bell, Search, Plus, Star, CheckCircle, Clock,
@@ -3593,18 +3595,15 @@ function PatientPortal({ onBack, onLogout }: { onBack: () => void; onLogout: () 
     setProfileSaving(false);
   };
 
-  const downloadPrescription = async (prescription: any) => {
+  const downloadPrescription = (prescription: any) => {
     setDownloadingPrescriptionId(prescription.id);
     try {
-      const response = await prescriptionsApi.downloadPdf(prescription.clinic_id, prescription.id);
-      const url = URL.createObjectURL(response.data);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `prescription-${prescription.id}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (error) { setPortalError(getApiErrorMessage(error, "Unable to generate the prescription PDF.")); }
-    finally { setDownloadingPrescriptionId(""); }
+      generatePrescriptionPdf(prescription);
+    } catch (error) {
+      setPortalError("Unable to generate the prescription PDF. Please try viewing and printing.");
+    } finally {
+      setDownloadingPrescriptionId("");
+    }
   };
 
   // Compute live metrics

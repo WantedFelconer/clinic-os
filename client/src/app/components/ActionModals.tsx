@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   X, Check, Plus, Trash2, Star, CreditCard, Send, Calendar,
   FileText, Pill, Package, Building2, User, Clock, AlertCircle,
@@ -10,6 +10,8 @@ import {
   clinicsApi, paymentsApi, patientsApi, reviewsApi, messagesApi,
   medicalReportsApi, getStoredUser,
 } from "../api";
+import { PrescriptionDocument } from "./PrescriptionDocument";
+import { generatePrescriptionPdf, printPrescription } from "../utils/prescriptionPdf";
 
 const localDate = (offsetDays = 0) => {
   const date = new Date();
@@ -960,111 +962,60 @@ export function ViewPrescriptionModal({
 }) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
+  const prescriptionRef = useRef<HTMLDivElement>(null);
+
   if (!open || !prescription) return null;
 
-  const downloadPdf = async () => {
+  const downloadPdf = () => {
     setDownloading(true);
     setDownloadError("");
     try {
-      const response = await prescriptionsApi.downloadPdf(prescription.clinic_id, prescription.id);
-      const url = URL.createObjectURL(response.data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `prescription-${prescription.id}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (error: any) {
-      setDownloadError(error.response?.data?.message || "Unable to generate this prescription PDF.");
-    } finally { setDownloading(false); }
+      generatePrescriptionPdf(prescription);
+    } catch (err: any) {
+      setDownloadError("Unable to generate PDF. Please try again or use Print.");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-gray-100" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden border border-gray-100 flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-slate-50">
           <div className="flex items-center gap-2">
-            <button onClick={downloadPdf} disabled={downloading} className="px-3 py-1.5 text-xs font-semibold border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 flex items-center gap-1.5 text-indigo-700">
-              <Download size={13} /> {downloading ? "Generating..." : "Download PDF"}
+            <button
+              onClick={downloadPdf}
+              disabled={downloading}
+              className="px-3.5 py-1.5 text-xs font-semibold bg-teal-600 hover:bg-teal-700 text-white rounded-lg disabled:opacity-50 flex items-center gap-1.5 shadow-xs transition-colors"
+            >
+              <Download size={13} /> {downloading ? "Generating PDF..." : "Download PDF"}
             </button>
-            <Pill size={18} className="text-indigo-600" />
-            <h2 className="text-lg font-bold text-slate-900">Digital Prescription</h2>
+            <Pill size={18} className="text-teal-600 ml-2" />
+            <h2 className="text-base font-bold text-slate-900">Digital Prescription</h2>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => window.print()} className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-white flex items-center gap-1.5 text-slate-700">
+            <button
+              onClick={() => printPrescription(prescription)}
+              className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-white flex items-center gap-1.5 text-slate-700 transition-colors cursor-pointer"
+            >
               <Printer size={13} /> Print Rx
             </button>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={18} /></button>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors ml-1" aria-label="Close">
+              <X size={18} />
+            </button>
           </div>
         </div>
 
-        <div className="p-8 space-y-6 max-h-[75vh] overflow-y-auto">
-          {downloadError && <div role="alert" className="rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-700">{downloadError}</div>}
-          {/* Header */}
-          <div className="flex justify-between items-start border-b border-gray-100 pb-5">
-            <div>
-              <h3 className="text-base font-bold text-slate-900">{prescription.clinic_name || "Clinic name unavailable"}</h3>
-              <p className="text-xs text-slate-500">Doctor: Dr. {prescription.doctor_first_name} {prescription.doctor_last_name}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs font-mono font-bold text-slate-900">Rx Date: {prescription.created_at ? new Date(prescription.created_at).toLocaleDateString() : "Unavailable"}</p>
-              <p className="text-xs text-slate-500">Rx ID: {prescription.id?.substring(0, 8)}</p>
-            </div>
+        {downloadError && (
+          <div role="alert" className="mx-6 mt-4 p-3 bg-rose-50 text-rose-700 text-xs font-semibold rounded-xl border border-rose-100">
+            {downloadError}
           </div>
+        )}
 
-          {/* Patient Info */}
-          <div className="p-4 bg-slate-50 rounded-xl flex justify-between items-center text-xs text-slate-700">
-            <div>
-              <span className="font-semibold text-slate-500 uppercase tracking-wide">Patient: </span>
-              <span className="font-bold text-slate-900">{prescription.patient_first_name} {prescription.patient_last_name}</span>
-            </div>
-            <div>
-              <span className="font-semibold text-slate-500 uppercase tracking-wide">Diagnosis: </span>
-              <span className="font-bold text-indigo-700">{prescription.diagnosis}</span>
-            </div>
+        <div className="overflow-y-auto flex-1 p-6 bg-slate-100/50">
+          <div className="rounded-xl shadow-xs border border-slate-200/80 overflow-hidden">
+            <PrescriptionDocument ref={prescriptionRef} prescription={prescription} />
           </div>
-
-          {/* Medications Table */}
-          <div>
-            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Prescribed Medications</h4>
-            <div className="border border-gray-100 rounded-xl overflow-hidden">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-gray-100 text-slate-500 font-semibold">
-                  <tr>
-                    <th className="p-3">Medicine</th>
-                    <th className="p-3">Dosage</th>
-                    <th className="p-3">Frequency</th>
-                    <th className="p-3">Duration</th>
-                    <th className="p-3">Instructions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50 text-slate-700">
-                  {(prescription.items || []).length > 0 ? (
-                    prescription.items.map((item: any, idx: number) => (
-                      <tr key={idx} className="hover:bg-slate-50/50">
-                        <td className="p-3 font-semibold text-slate-900">{item.medication_name}</td>
-                        <td className="p-3">{item.dosage || "1 dose"}</td>
-                        <td className="p-3">{item.frequency || "Not recorded"}</td>
-                        <td className="p-3">{item.duration || "Not recorded"}</td>
-                        <td className="p-3 text-slate-500">{item.instructions || "As directed"}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="p-4 text-center text-slate-400">No medication items listed</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Advice / Notes */}
-          {prescription.notes && (
-            <div className="p-4 bg-amber-50/40 border border-amber-100 rounded-xl">
-              <h5 className="text-xs font-bold text-amber-800 uppercase tracking-wider mb-1">Doctor Advice</h5>
-              <p className="text-xs text-amber-900 leading-relaxed">{prescription.notes}</p>
-            </div>
-          )}
         </div>
       </div>
     </div>
