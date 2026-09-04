@@ -59,11 +59,19 @@ export function BookAppointmentModal({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (clinicId && clinicId !== "0") {
-      setSelectedClinicId(clinicId);
-      setForm(f => ({ ...f, doctor_id: doctorId || "", service_id: "", start_time: "", end_time: "" }));
-    }
-  }, [clinicId, doctorId]);
+    if (!open) return;
+
+    const nextClinicId = clinicId && clinicId !== "0" ? clinicId : "";
+    setSelectedClinicId(nextClinicId);
+    setForm(f => ({
+      ...f,
+      patient_id: isPatient ? (patientId || "") : (patientId || f.patient_id),
+      doctor_id: doctorId || "",
+      service_id: "",
+      start_time: "",
+      end_time: "",
+    }));
+  }, [open, clinicId, doctorId, patientId, isPatient]);
 
   useEffect(() => {
     if (clinicsList) setAvailableClinics(clinicsList);
