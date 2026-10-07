@@ -10,6 +10,15 @@ This is a deployment checklist, not a zero-configuration guarantee. Apply the da
 - Output directory: `client/dist`
 - API entry point: `api/index.js`
 
+The Vercel project's **Root Directory must be empty (the repository root)**. Do not
+set it to `client`: doing so prevents Vercel from reading the root `vercel.json`
+and from discovering the `api` function. Repository configuration intentionally
+overrides the dashboard framework, build command, and output directory settings.
+
+Use the project's stable production domain when sharing or bookmarking the app.
+Generated preview URLs identify one deployment and can stop working if that
+deployment is removed.
+
 Vercel terminates TLS before the Express application. The API trusts exactly one proxy hop when `VERCEL=1`, enforces HTTPS from the trusted protocol signal, and emits HSTS on secure production responses.
 
 ## Required production environment

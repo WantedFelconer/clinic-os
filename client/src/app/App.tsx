@@ -587,7 +587,7 @@ function AuthPage({ onSuccess, onBack, notice }: { onSuccess: (token: string, us
         setOtp(["", "", "", "", "", ""]);
       }, 2000);
     } catch (err: any) {
-      setError(err.response?.data?.message || "Verification failed");
+      setError(getApiErrorMessage(err, "Verification failed"));
     } finally {
       setSubmitting(false);
     }
@@ -603,7 +603,7 @@ function AuthPage({ onSuccess, onBack, notice }: { onSuccess: (token: string, us
       setResendSuccess(true);
       setTimeout(() => setResendSuccess(false), 4000);
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to resend OTP");
+      setError(getApiErrorMessage(err, "Failed to resend OTP"));
     }
   };
 
@@ -626,7 +626,7 @@ function AuthPage({ onSuccess, onBack, notice }: { onSuccess: (token: string, us
       } else if (mode === "register") {
         const nameParts = name.trim().split(/\s+/);
         const fn = nameParts[0] || "";
-        const ln = nameParts.slice(1).join(" ") || "";
+        const ln = nameParts.slice(1).join(" ") || fn;
         setFirstName(fn);
         const res = await authApi.register({ email, password, role, first_name: fn, last_name: ln });
         if (res.data?.dev_otp) {
@@ -639,7 +639,7 @@ function AuthPage({ onSuccess, onBack, notice }: { onSuccess: (token: string, us
         setSent(true);
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || "Something went wrong");
+      setError(getApiErrorMessage(err, "Something went wrong"));
     } finally {
       setSubmitting(false);
     }

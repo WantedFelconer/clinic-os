@@ -22,6 +22,11 @@ const errorHandler = (err, req, res, next) => {
     return res.status(400).json({ message: 'Data value too large for the field.' });
   }
 
+  // MySQL incorrect date or truncated wrong value (errno 1292)
+  if (err.errno === 1292) {
+    return res.status(400).json({ message: 'Invalid date or field format provided.' });
+  }
+
   if (err.name === 'ValidationError') {
     return res.status(400).json({ message: err.message });
   }

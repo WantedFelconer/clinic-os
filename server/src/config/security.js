@@ -42,7 +42,12 @@ function getJwtConfig(env = process.env) {
 }
 
 function parseAllowedOrigins(env = process.env) {
-  const configured = [env.FRONTEND_URL, ...(env.ALLOWED_ORIGINS || '').split(',')]
+  const configured = [
+    env.FRONTEND_URL,
+    ...(env.ALLOWED_ORIGINS || '').split(','),
+    env.VERCEL_URL ? `https://${env.VERCEL_URL}` : null,
+    env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : null,
+  ]
     .map((origin) => origin && origin.trim())
     .filter(Boolean);
 

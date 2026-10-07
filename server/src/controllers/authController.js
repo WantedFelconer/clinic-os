@@ -93,12 +93,17 @@ const authController = {
         await sendOTP(email, otp, first_name || (existing ? existing.first_name : ''));
       } catch (err) {
         console.warn('[Email Delivery Warning] Failed to deliver verification code:', err.message);
-        return res.status(500).json({
-          message: "We couldn't send the verification email right now. Please try again shortly.",
-        });
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`[Dev Verification] Brevo email delivery skipped/failed in dev. OTP for ${email}: ${otp}`);
+        } else {
+          return res.status(502).json({
+            message: "We couldn't deliver the verification email right now. Please verify your email address or try again shortly.",
+          });
+        }
       }
 
       // Update or create user account
+      const resolvedLastName = (last_name || first_name || '').trim();
       if (existing && !existing.is_verified) {
         if (password) {
           await User.updatePassword(existing.id, password);
@@ -110,7 +115,7 @@ const authController = {
           password,
           role,
           first_name: first_name.trim(),
-          last_name: last_name.trim(),
+          last_name: resolvedLastName,
           phone: phone ? phone.trim() : null,
           verification_otp: otpHash,
           verification_otp_expires: otpExpires,
@@ -129,7 +134,7 @@ const authController = {
           ? 'Registration pending verification. A new verification code has been sent to your email.'
           : 'Registration successful. Please check your email for the verification code.',
         email,
-        dev_otp: process.env.NODE_ENV === 'test' ? otp : undefined,
+        dev_otp: process.env.NODE_ENV !== 'production' ? otp : undefined,
       });
     } catch (error) {
       next(error);
@@ -252,9 +257,13 @@ const authController = {
         await sendOTP(email, otp, user.first_name);
       } catch (err) {
         console.warn('[Email Delivery Warning] Failed to deliver resend code:', err.message);
-        return res.status(500).json({
-          message: "We couldn't send the verification email right now. Please try again shortly.",
-        });
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`[Dev Verification] Resend OTP for ${email}: ${otp}`);
+        } else {
+          return res.status(502).json({
+            message: "We couldn't deliver the verification email right now. Please try again shortly.",
+          });
+        }
       }
 
       // Persist OTP hash to database
@@ -269,7 +278,7 @@ const authController = {
 
       res.json({
         message: 'A new verification code has been sent to your email.',
-        dev_otp: process.env.NODE_ENV === 'test' ? otp : undefined,
+        dev_otp: process.env.NODE_ENV !== 'production' ? otp : undefined,
       });
     } catch (error) {
       next(error);

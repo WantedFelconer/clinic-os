@@ -1,13 +1,31 @@
 const db = require('../../../core/config/database');
 const { generateUUID } = require('../../../core/utils/helpers');
 
+const sanitizeField = (val) => (val !== undefined && val !== null && String(val).trim() !== '' ? String(val).trim() : null);
+
 const Patient = {
   async create({ user_id, clinic_id, first_name, last_name, date_of_birth, gender, phone, email, address, blood_group, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone }) {
     const id = generateUUID();
     await db.execute(
       `INSERT INTO patients (id, user_id, clinic_id, first_name, last_name, date_of_birth, gender, phone, email, address, blood_group, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, user_id ?? null, clinic_id ?? null, first_name ?? null, last_name ?? null, date_of_birth ?? null, gender ?? null, phone ?? null, email ?? null, address ?? null, blood_group ?? null, allergies ?? null, chronic_conditions ?? null, emergency_contact_name ?? null, emergency_contact_phone ?? null]
+      [
+        id,
+        user_id ?? null,
+        clinic_id ?? null,
+        first_name ?? null,
+        last_name ?? null,
+        sanitizeField(date_of_birth),
+        sanitizeField(gender),
+        sanitizeField(phone),
+        sanitizeField(email),
+        sanitizeField(address),
+        sanitizeField(blood_group),
+        sanitizeField(allergies),
+        sanitizeField(chronic_conditions),
+        sanitizeField(emergency_contact_name),
+        sanitizeField(emergency_contact_phone)
+      ]
     );
     return this.findById(id);
   },
@@ -55,13 +73,14 @@ const Patient = {
 
   async update(id, fields) {
     const allowedFields = ['first_name', 'last_name', 'date_of_birth', 'gender', 'phone', 'email', 'address', 'blood_group', 'allergies', 'chronic_conditions', 'emergency_contact_name', 'emergency_contact_phone', 'is_active'];
+    const nullableFields = new Set(['date_of_birth', 'gender', 'phone', 'email', 'address', 'blood_group', 'allergies', 'chronic_conditions', 'emergency_contact_name', 'emergency_contact_phone']);
     const updates = [];
     const values = [];
 
     for (const [key, value] of Object.entries(fields)) {
       if (allowedFields.includes(key)) {
         updates.push(`${key} = ?`);
-        values.push(value ?? null);
+        values.push(nullableFields.has(key) ? sanitizeField(value) : (value ?? null));
       }
     }
 

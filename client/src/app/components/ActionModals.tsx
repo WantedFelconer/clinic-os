@@ -8,7 +8,7 @@ import {
 import {
   appointmentsApi, medicalRecordsApi, prescriptionsApi,
   clinicsApi, paymentsApi, patientsApi, reviewsApi, messagesApi,
-  medicalReportsApi, getStoredUser,
+  medicalReportsApi, getStoredUser, getApiErrorMessage,
 } from "../api";
 import { PrescriptionDocument } from "./PrescriptionDocument";
 import { generatePrescriptionPdf, printPrescription } from "../utils/prescriptionPdf";
@@ -1067,11 +1067,23 @@ export function AddPatientModal({
         setError("Date of birth cannot be in the future.");
         return;
       }
-      await patientsApi.create(clinicId, form);
+      const payload = {
+        ...form,
+        date_of_birth: form.date_of_birth.trim() || undefined,
+        email: form.email.trim() || undefined,
+        phone: form.phone.trim() || undefined,
+        blood_group: form.blood_group.trim() || undefined,
+        address: form.address.trim() || undefined,
+        emergency_contact_name: form.emergency_contact_name.trim() || undefined,
+        emergency_contact_phone: form.emergency_contact_phone.trim() || undefined,
+        allergies: form.allergies.trim() || undefined,
+        chronic_conditions: form.chronic_conditions.trim() || undefined,
+      };
+      await patientsApi.create(clinicId, payload);
       onSuccess();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to register patient");
+      setError(getApiErrorMessage(err, "Failed to register patient"));
     } finally {
       setSubmitting(false);
     }
