@@ -45,7 +45,7 @@ Never upload `server/.env`. Configure values in Vercel's environment settings an
 2. Run `npm run db:migrate --prefix server` from a controlled environment using the production variables.
 3. Do not run the seed command against production.
 4. Deploy and check `/api/health` over HTTPS.
-5. Confirm Vercel Cron invokes `/api/internal/appointment-reminders`; `vercel.json` schedules it hourly. The endpoint rejects requests without the matching bearer secret.
+5. (Optional) Appointment reminders endpoint /api/internal/appointment-reminders is available for external schedulers (e.g. cron-job.org) or Vercel Pro crons. The endpoint rejects requests without the matching bearer secret.
 
 For a persistent Node deployment rather than Vercel, either terminate TLS at a trusted reverse proxy with `TRUST_PROXY` configured or provide `TLS_CERT_PATH` and `TLS_KEY_PATH`. The process-local reminder worker starts automatically in that environment.
 
